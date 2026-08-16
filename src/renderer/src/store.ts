@@ -11,7 +11,7 @@ import type {
   TransformMode,
   TransformState
 } from '../../shared/types'
-import { createDefaultDisplayTransform, DISPLAY_CASE_SELECTION_ID } from '../../shared/types'
+import { createDefaultDisplayTransform, createDefaultLightingSettings, DISPLAY_CASE_SELECTION_ID } from '../../shared/types'
 import { setLanguage } from './i18n'
 
 interface AppState {
@@ -90,10 +90,17 @@ function cloneProject(project: DisplayProject): DisplayProject {
 }
 
 function withDisplayDefaults(project: DisplayProject): DisplayProject {
+  const defaultLighting = createDefaultLightingSettings()
+  const lighting = project.lighting ?? defaultLighting
   return {
     ...project,
     caseVisible: project.caseVisible !== false,
-    displayTransform: project.displayTransform ?? createDefaultDisplayTransform()
+    displayTransform: project.displayTransform ?? createDefaultDisplayTransform(),
+    lighting: {
+      ...lighting,
+      azimuth: Number.isFinite(lighting.azimuth) ? lighting.azimuth : defaultLighting.azimuth,
+      elevation: Number.isFinite(lighting.elevation) ? lighting.elevation : defaultLighting.elevation
+    }
   }
 }
 

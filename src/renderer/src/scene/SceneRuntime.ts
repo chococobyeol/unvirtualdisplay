@@ -710,6 +710,16 @@ export class SceneRuntime {
 
   private updateLighting(project: DisplayProject): void {
     const intensity = project.lighting.intensity
+    const azimuth = THREE.MathUtils.degToRad(project.lighting.azimuth ?? 30)
+    const elevation = THREE.MathUtils.degToRad(project.lighting.elevation ?? 45)
+    const distance = 6.8
+    const horizontalDistance = Math.cos(elevation) * distance
+    const target = this.keyLight.target.position
+    this.keyLight.position.set(
+      target.x + Math.sin(azimuth) * horizontalDistance,
+      target.y + Math.sin(elevation) * distance,
+      target.z + Math.cos(azimuth) * horizontalDistance
+    )
     this.fillLight.intensity = 1.1 * intensity
     this.keyLight.intensity = 58 * intensity
     this.keyLight.color.copy(roundedColor(project.lighting.warmth))

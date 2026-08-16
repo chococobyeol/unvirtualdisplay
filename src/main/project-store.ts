@@ -11,7 +11,7 @@ import type {
   ProjectResetScope,
   ProjectSummary
 } from '../shared/types'
-import { createDefaultCameraSettings, createDefaultDisplayTransform } from '../shared/types'
+import { createDefaultCameraSettings, createDefaultDisplayTransform, createDefaultLightingSettings } from '../shared/types'
 
 interface StoreIndex {
   activeProjectId: string
@@ -44,11 +44,7 @@ function createProject(name = 'My display'): DisplayProject {
     displayTransform: createDefaultDisplayTransform(),
     items: [],
     camera: createDefaultCameraSettings(),
-    lighting: {
-      intensity: 1,
-      warmth: 0.55,
-      shadows: true
-    },
+    lighting: createDefaultLightingSettings(),
     background: {
       mode: 'transparent',
       color: '#11100f',
@@ -63,12 +59,21 @@ function normalizeProject(project: DisplayProject): DisplayProject {
   const seenItemIds = new Set<string>()
   const background = project.background ?? { mode: 'transparent', color: '#11100f', fit: 'cover' }
   const displayTransform = project.displayTransform ?? createDefaultDisplayTransform()
+  const defaultLighting = createDefaultLightingSettings()
+  const lighting = project.lighting ?? defaultLighting
   return {
     ...project,
     schemaVersion: 1,
     revision: Number.isSafeInteger(project.revision) && project.revision >= 0 ? project.revision : 0,
     caseVisible: project.caseVisible !== false,
     displayTransform,
+    lighting: {
+      intensity: Number.isFinite(lighting.intensity) ? Math.min(2, Math.max(0.25, lighting.intensity)) : defaultLighting.intensity,
+      warmth: Number.isFinite(lighting.warmth) ? Math.min(1, Math.max(0, lighting.warmth)) : defaultLighting.warmth,
+      shadows: lighting.shadows !== false,
+      azimuth: Number.isFinite(lighting.azimuth) ? Math.min(180, Math.max(-180, lighting.azimuth)) : defaultLighting.azimuth,
+      elevation: Number.isFinite(lighting.elevation) ? Math.min(85, Math.max(15, lighting.elevation)) : defaultLighting.elevation
+    },
     background: {
       mode: ['transparent', 'solid', 'image'].includes(background.mode) ? background.mode : 'transparent',
       color: /^#[0-9a-f]{6}$/i.test(background.color) ? background.color : '#11100f',

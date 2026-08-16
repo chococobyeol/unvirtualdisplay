@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import type { PointerEvent as ReactPointerEvent } from 'react'
 import {
   Box,
   Camera,
@@ -96,6 +97,85 @@ function Toggle({ checked, onChange, label, hint }: {
       <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
       <i aria-hidden="true" />
     </label>
+  )
+}
+
+function LightDirectionControl({ azimuth, elevation, label, hint, onChange }: {
+  azimuth: number
+  elevation: number
+  label: string
+  hint: string
+  onChange: (azimuth: number, elevation: number) => void
+}): React.JSX.Element {
+  const radial = Math.min(1, Math.max(0, (85 - elevation) / 70))
+  const azimuthRadians = azimuth * Math.PI / 180
+  const dotLeft = 50 + Math.sin(azimuthRadians) * radial * 38
+  const dotTop = 50 - Math.cos(azimuthRadians) * radial * 38
+
+  const updateFromPointer = (event: ReactPointerEvent<HTMLButtonElement>): void => {
+    const bounds = event.currentTarget.getBoundingClientRect()
+    const radius = Math.max(1, (Math.min(bounds.width, bounds.height) - 8) / 2)
+    let x = (event.clientX - bounds.left - bounds.width / 2) / radius
+    let y = (event.clientY - bounds.top - bounds.height / 2) / radius
+    const distance = Math.hypot(x, y)
+    if (distance > 1) {
+      x /= distance
+      y /= distance
+    }
+    const clampedDistance = Math.min(1, distance)
+    const nextAzimuth = clampedDistance < 0.04 ? azimuth : Math.atan2(x, -y) * 180 / Math.PI
+    const nextElevation = 85 - clampedDistance * 70
+    onChange(Math.round(nextAzimuth), Math.round(nextElevation))
+  }
+
+  const beginDrag = (event: ReactPointerEvent<HTMLButtonElement>): void => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    event.currentTarget.focus()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    updateFromPointer(event)
+  }
+
+  const continueDrag = (event: ReactPointerEvent<HTMLButtonElement>): void => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) updateFromPointer(event)
+  }
+
+  const endDrag = (event: ReactPointerEvent<HTMLButtonElement>): void => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+  }
+
+  const adjustWithKeyboard = (event: React.KeyboardEvent<HTMLButtonElement>): void => {
+    let nextAzimuth = azimuth
+    let nextElevation = elevation
+    if (event.key === 'ArrowLeft') nextAzimuth -= 5
+    else if (event.key === 'ArrowRight') nextAzimuth += 5
+    else if (event.key === 'ArrowUp') nextElevation += 5
+    else if (event.key === 'ArrowDown') nextElevation -= 5
+    else return
+    event.preventDefault()
+    nextAzimuth = ((nextAzimuth + 180) % 360 + 360) % 360 - 180
+    onChange(nextAzimuth, Math.min(85, Math.max(15, nextElevation)))
+  }
+
+  return (
+    <div className="light-direction-row">
+      <span>{label}</span>
+      <button
+        type="button"
+        className="light-direction-pad"
+        title={hint}
+        aria-label={label}
+        aria-valuetext={`${Math.round(azimuth)}°, ${Math.round(elevation)}°`}
+        onPointerDown={beginDrag}
+        onPointerMove={continueDrag}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onKeyDown={adjustWithKeyboard}
+      >
+        <i style={{ left: `${dotLeft}%`, top: `${dotTop}%` }} />
+      </button>
+      <b>{Math.round(azimuth)}° · {Math.round(elevation)}°</b>
+    </div>
   )
 }
 
@@ -502,6 +582,16 @@ export function EditorApp(): React.JSX.Element | null {
         </div>
         <footer className="scene-footer panel-surface">
           <div className="range-row compact"><span>{t('lightIntensity')}</span><input type="range" min="0.25" max="2" step="0.05" value={project.lighting.intensity} onChange={(event) => changeLighting(Number(event.target.value))} /><b>{Math.round(project.lighting.intensity * 100)}%</b></div>
+          <LightDirectionControl
+            azimuth={project.lighting.azimuth}
+            elevation={project.lighting.elevation}
+            label={t('lightDirection')}
+            hint={t('lightDirectionHint')}
+            onChange={(azimuth, elevation) => mutate((draft) => {
+              draft.lighting.azimuth = azimuth
+              draft.lighting.elevation = elevation
+            }, false)}
+          />
           <Toggle checked={project.lighting.shadows} label={t('shadows')} onChange={(shadows) => mutate((draft) => { draft.lighting.shadows = shadows })} />
         </footer>
       </section>

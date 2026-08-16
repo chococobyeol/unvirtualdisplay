@@ -78,6 +78,18 @@ export interface LightingSettings {
   intensity: number
   warmth: number
   shadows: boolean
+  azimuth: number
+  elevation: number
+}
+
+export function createDefaultLightingSettings(): LightingSettings {
+  return {
+    intensity: 1,
+    warmth: 0.55,
+    shadows: true,
+    azimuth: 30,
+    elevation: 45
+  }
 }
 
 export interface BackgroundSettings {

@@ -28,8 +28,23 @@ describe('ProjectStore', () => {
     expect(project.caseVisible).toBe(true)
     expect(project.displayTransform.position).toEqual({ x: 0, y: -0.65, z: 0 })
     expect(project.background).toEqual({ mode: 'transparent', color: '#11100f', fit: 'cover' })
+    expect(project.lighting.azimuth).toBe(30)
+    expect(project.lighting.elevation).toBe(45)
     expect(store.settings.language).toBe('ko')
     expect((await store.listProjects()).map((entry) => entry.id)).toContain(project.id)
+  })
+
+  it('adds light direction defaults to older projects', async () => {
+    const store = await createStore()
+    const project = await store.getActiveProject()
+    delete (project.lighting as Partial<typeof project.lighting>).azimuth
+    delete (project.lighting as Partial<typeof project.lighting>).elevation
+    project.revision += 1
+
+    const saved = await store.saveProject(project)
+
+    expect(saved.project.lighting.azimuth).toBe(30)
+    expect(saved.project.lighting.elevation).toBe(45)
   })
 
   it('saves, duplicates, activates and deletes projects', async () => {
@@ -122,6 +137,8 @@ describe('ProjectStore', () => {
     expect(reset.project.caseVisible).toBe(true)
     expect(reset.project.camera.position.x).toBe(4.8)
     expect(reset.project.lighting.intensity).toBe(1)
+    expect(reset.project.lighting.azimuth).toBe(30)
+    expect(reset.project.lighting.elevation).toBe(45)
     expect(reset.project.background.mode).toBe('transparent')
     await expect(readFile(backgroundPath)).rejects.toThrow()
     expect(reset.project.revision).toBeGreaterThan(cleared.project.revision)
