@@ -19,7 +19,7 @@ import type {
 import { createDefaultDisplayTransform, DISPLAY_CASE_SELECTION_ID } from '../../../shared/types'
 import { cameraSettingsEqual } from '../../../shared/camera'
 import { findOpenImportPosition, isPlacementBelowSafetyFloor } from './itemPlacement'
-import { hitsVisibleTransformHandle, pickItemSelection, pickSceneSelection } from './sceneSelection'
+import { hitsVisibleTransformHandle, pickSceneSelection } from './sceneSelection'
 
 interface SceneCallbacks {
   onSelect: (id: string | null) => void
@@ -1489,19 +1489,21 @@ export class SceneRuntime {
     const controlsHelper = this.transformControls?.getHelper() ?? null
     if (hitsVisibleTransformHandle(this.raycaster, controlsHelper)) return
 
-    const itemId = pickItemSelection(this.raycaster, itemRoots)
-    if (itemId && itemId !== this.selectedId) {
-      if (this.transformControls) this.transformControls.axis = null
-      this.setSelection(itemId)
-      this.callbacks.onSelect(itemId)
-      event.stopImmediatePropagation()
-      return
+    // The native TransformControls picker is deliberately much wider than the
+    // rendered arrows. Disable it for this pointerdown unless a visible handle
+    // was hit, so ordinary scene clicks reach the object actually under them.
+    if (this.transformControls) {
+      const controls = this.transformControls
+      const wasEnabled = controls.enabled
+      controls.axis = null
+      controls.enabled = false
+      queueMicrotask(() => {
+        if (!this.disposed) controls.enabled = wasEnabled
+      })
     }
 
-    // Preserve normal gizmo dragging when its handle belongs to the currently
-    // selected object. Only a different exhibit is allowed to take priority.
-    if (this.transformControls?.axis) return
     const id = pickSceneSelection(this.raycaster, itemRoots, this.caseLayer.visible ? this.caseLayer : null)
+    if (id === this.selectedId) return
     this.setSelection(id)
     this.callbacks.onSelect(id)
   }
