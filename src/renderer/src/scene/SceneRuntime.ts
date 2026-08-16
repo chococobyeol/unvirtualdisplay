@@ -19,7 +19,7 @@ import type {
 import { createDefaultDisplayTransform, DISPLAY_CASE_SELECTION_ID } from '../../../shared/types'
 import { cameraSettingsEqual } from '../../../shared/camera'
 import { findOpenImportPosition, isPlacementBelowSafetyFloor } from './itemPlacement'
-import { pickSceneSelection } from './sceneSelection'
+import { pickItemSelection, pickSceneSelection } from './sceneSelection'
 
 interface SceneCallbacks {
   onSelect: (id: string | null) => void
@@ -473,7 +473,9 @@ export class SceneRuntime {
     this.scene.add(this.fillLight, this.keyLight, this.keyLight.target)
 
     this.gltfLoader.register((parser) => new VRMLoaderPlugin(parser))
-    this.canvas.addEventListener('pointerdown', this.handlePointerDown)
+    // Capture selection before TransformControls. Otherwise the case gizmo's
+    // broad invisible picker can swallow clicks on exhibits behind it.
+    this.canvas.addEventListener('pointerdown', this.handlePointerDown, true)
     this.canvas.addEventListener('contextmenu', this.handleContextMenu)
     this.resizeObserver = new ResizeObserver(() => this.resize())
     this.resizeObserver.observe(canvas)
@@ -624,7 +626,7 @@ export class SceneRuntime {
     cancelAnimationFrame(this.animationFrame)
     cancelAnimationFrame(this.cameraPreviewFrame)
     this.resizeObserver.disconnect()
-    this.canvas.removeEventListener('pointerdown', this.handlePointerDown)
+    this.canvas.removeEventListener('pointerdown', this.handlePointerDown, true)
     this.canvas.removeEventListener('contextmenu', this.handleContextMenu)
     this.controls.dispose()
     this.viewportGizmo?.dispose()
@@ -1475,7 +1477,7 @@ export class SceneRuntime {
   }
 
   private handlePointerDown = (event: PointerEvent): void => {
-    if (event.button !== 0 || this.variant !== 'editor' || this.transformControls?.axis) return
+    if (event.button !== 0 || this.variant !== 'editor') return
     const rect = this.canvas.getBoundingClientRect()
     this.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
     this.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
@@ -1483,7 +1485,21 @@ export class SceneRuntime {
     const itemRoots = [...this.items.values()]
       .filter((runtime) => runtime.snapshot.visible !== false)
       .map((runtime) => runtime.root)
+
+    const itemId = pickItemSelection(this.raycaster, itemRoots)
+    if (itemId && itemId !== this.selectedId) {
+      if (this.transformControls) this.transformControls.axis = null
+      this.setSelection(itemId)
+      this.callbacks.onSelect(itemId)
+      event.stopImmediatePropagation()
+      return
+    }
+
+    // Preserve normal gizmo dragging when its handle belongs to the currently
+    // selected object. Only a different exhibit is allowed to take priority.
+    if (this.transformControls?.axis) return
     const id = pickSceneSelection(this.raycaster, itemRoots, this.caseLayer.visible ? this.caseLayer : null)
+    this.setSelection(id)
     this.callbacks.onSelect(id)
   }
 

@@ -10,6 +10,10 @@ function itemIdFromHit(hit: THREE.Object3D | undefined): string | null {
   return null
 }
 
+export function pickItemSelection(raycaster: THREE.Raycaster, itemRoots: THREE.Object3D[]): string | null {
+  return itemIdFromHit(raycaster.intersectObjects(itemRoots, true)[0]?.object)
+}
+
 export function pickSceneSelection(
   raycaster: THREE.Raycaster,
   itemRoots: THREE.Object3D[],
@@ -17,8 +21,7 @@ export function pickSceneSelection(
 ): string | null {
   // The case often sits in front of an exhibit along the same ray. Test the
   // exhibits separately so the case never steals a click meant for an item.
-  const itemHit = raycaster.intersectObjects(itemRoots, true)[0]?.object
-  const itemId = itemIdFromHit(itemHit)
+  const itemId = pickItemSelection(raycaster, itemRoots)
   if (itemId) return itemId
 
   if (caseLayer && raycaster.intersectObject(caseLayer, true).length > 0) {
