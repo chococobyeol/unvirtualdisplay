@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type {
   AppSettings,
+  CameraPreviewEvent,
   DisplayProject,
   DisplayResizeEdge,
   ProjectEvent,
@@ -18,6 +19,7 @@ const api: UnvirtualApi = {
   saveProject: (project: DisplayProject) => ipcRenderer.invoke('project:save', project),
   resetProject: (projectId: string, scope: ProjectResetScope) => ipcRenderer.invoke('project:reset', projectId, scope),
   previewProject: (project: DisplayProject) => ipcRenderer.send('project:preview', project),
+  previewCamera: (preview: CameraPreviewEvent) => ipcRenderer.send('camera:preview', preview),
   exportProject: (projectId) => ipcRenderer.invoke('project:export', projectId),
   importProjectArchive: () => ipcRenderer.invoke('project:import-archive'),
   importAssets: (projectId) => ipcRenderer.invoke('asset:import', projectId),
@@ -49,6 +51,11 @@ const api: UnvirtualApi = {
     const handler = (_event: Electron.IpcRendererEvent, project: DisplayProject): void => listener(project)
     ipcRenderer.on('project:preview', handler)
     return () => ipcRenderer.removeListener('project:preview', handler)
+  },
+  onCameraPreview: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, preview: CameraPreviewEvent): void => listener(preview)
+    ipcRenderer.on('camera:preview', handler)
+    return () => ipcRenderer.removeListener('camera:preview', handler)
   },
   onSettingsChanged: (listener) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: SettingsEvent): void => listener(payload)

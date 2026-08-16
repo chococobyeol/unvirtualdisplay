@@ -142,6 +142,11 @@ export interface ProjectEvent {
   activeProjectId: string
 }
 
+export interface CameraPreviewEvent {
+  projectId: string
+  camera: CameraSettings
+}
+
 export type ProjectResetScope = 'items' | 'all'
 
 export interface SettingsEvent {
@@ -157,6 +162,7 @@ export interface UnvirtualApi {
   saveProject: (project: DisplayProject) => Promise<ProjectEvent>
   resetProject: (projectId: string, scope: ProjectResetScope) => Promise<ProjectEvent>
   previewProject: (project: DisplayProject) => void
+  previewCamera: (preview: CameraPreviewEvent) => void
   exportProject: (projectId: string) => Promise<boolean>
   importProjectArchive: () => Promise<ProjectEvent | null>
   importAssets: (projectId: string) => Promise<ImportedAsset[]>
@@ -177,5 +183,6 @@ export interface UnvirtualApi {
   onDisplayEditingChanged: (listener: (editing: boolean) => void) => () => void
   onProjectChanged: (listener: (event: ProjectEvent) => void) => () => void
   onProjectPreview: (listener: (project: DisplayProject) => void) => () => void
+  onCameraPreview: (listener: (preview: CameraPreviewEvent) => void) => () => void
   onSettingsChanged: (listener: (event: SettingsEvent) => void) => () => void
 }

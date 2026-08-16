@@ -37,6 +37,7 @@ export const SceneView = forwardRef<SceneViewHandle, SceneViewProps>(function Sc
     const runtime = new SceneRuntime(canvas, variant, quality, {
       onSelect: (id) => callbacksRef.current.onSelect?.(id),
       onTransform: (id, transform, remember) => callbacksRef.current.onTransform?.(id, transform, remember),
+      onCameraPreview: (camera) => window.unvirtual.previewCamera({ projectId: projectRef.current.id, camera }),
       onCamera: (camera) => callbacksRef.current.onCamera?.(camera)
     })
     runtimeRef.current = runtime
@@ -54,6 +55,9 @@ export const SceneView = forwardRef<SceneViewHandle, SceneViewProps>(function Sc
   }, [variant])
 
   useEffect(() => { void runtimeRef.current?.syncProject(project) }, [project])
+  useEffect(() => window.unvirtual.onCameraPreview(({ projectId, camera }) => {
+    if (projectId === projectRef.current.id) runtimeRef.current?.setCamera(camera)
+  }), [])
   useEffect(() => runtimeRef.current?.setSelection(selectedItemId), [selectedItemId])
   useEffect(() => runtimeRef.current?.setTransformMode(transformMode), [transformMode])
   useEffect(() => runtimeRef.current?.setQuality(quality), [quality])

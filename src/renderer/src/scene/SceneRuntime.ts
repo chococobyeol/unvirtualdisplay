@@ -22,6 +22,7 @@ import { cameraSettingsEqual } from '../../../shared/camera'
 interface SceneCallbacks {
   onSelect: (id: string | null) => void
   onTransform: (id: string, transform: TransformState, remember?: boolean) => void
+  onCameraPreview: (camera: CameraSettings) => void
   onCamera: (camera: CameraSettings) => void
 }
 
@@ -342,7 +343,8 @@ export class SceneRuntime {
   private keyLight: THREE.SpotLight
   private fillLight: THREE.HemisphereLight
   private disposed = false
-  private lastRenderedAt = 0
+  private applyingCamera = false
+  private cameraPreviewFrame = 0
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -381,8 +383,7 @@ export class SceneRuntime {
     this.camera.position.set(4.8, 3.2, 6.8)
     this.controls = new OrbitControls(this.camera, canvas)
     this.controls.enabled = true
-    this.controls.enableDamping = true
-    this.controls.dampingFactor = 0.08
+    this.controls.enableDamping = false
     this.controls.minDistance = 2.3
     this.controls.maxDistance = 12
     this.controls.maxPolarAngle = Math.PI
@@ -391,15 +392,13 @@ export class SceneRuntime {
     this.controls.mouseButtons.RIGHT = THREE.MOUSE.ROTATE
     this.controls.target.set(0, 1.35, 0)
     const reportCamera = (): void => {
-      const camera = {
-        position: { x: this.camera.position.x, y: this.camera.position.y, z: this.camera.position.z },
-        target: { x: this.controls.target.x, y: this.controls.target.y, z: this.controls.target.z },
-        fov: this.camera.fov
-      }
+      this.flushCameraPreview()
+      const camera = this.getCameraSettings()
       const saved = this.project?.camera
       if (saved && cameraSettingsEqual(saved, camera)) return
       this.callbacks.onCamera(camera)
     }
+    this.controls.addEventListener('change', this.queueCameraPreview)
     this.controls.addEventListener('end', reportCamera)
 
     const viewportGizmo = variant === 'editor'
@@ -452,6 +451,7 @@ export class SceneRuntime {
       viewportGizmo.attachControls(this.controls)
     }
     this.viewportGizmo = viewportGizmo
+    this.viewportGizmo?.addEventListener('change', this.queueCameraPreview)
     this.viewportGizmo?.addEventListener('end', reportCamera)
 
     this.transformControls = variant === 'editor' ? new TransformControls(this.camera, canvas) : null
@@ -568,12 +568,39 @@ export class SceneRuntime {
     this.transformControls?.setMode(mode)
   }
 
+  private getCameraSettings(): CameraSettings {
+    return {
+      position: { x: this.camera.position.x, y: this.camera.position.y, z: this.camera.position.z },
+      target: { x: this.controls.target.x, y: this.controls.target.y, z: this.controls.target.z },
+      fov: this.camera.fov
+    }
+  }
+
+  private queueCameraPreview = (): void => {
+    if (this.applyingCamera || this.disposed || this.cameraPreviewFrame) return
+    this.cameraPreviewFrame = requestAnimationFrame(() => {
+      this.cameraPreviewFrame = 0
+      if (!this.applyingCamera && !this.disposed) this.callbacks.onCameraPreview(this.getCameraSettings())
+    })
+  }
+
+  private flushCameraPreview(): void {
+    if (this.cameraPreviewFrame) cancelAnimationFrame(this.cameraPreviewFrame)
+    this.cameraPreviewFrame = 0
+    if (!this.applyingCamera && !this.disposed) this.callbacks.onCameraPreview(this.getCameraSettings())
+  }
+
   setCamera(camera: CameraSettings): void {
-    this.camera.position.copy(vector3(camera.position))
-    this.camera.fov = camera.fov
-    this.camera.updateProjectionMatrix()
-    this.controls.target.copy(vector3(camera.target))
-    this.controls.update()
+    this.applyingCamera = true
+    try {
+      this.camera.position.copy(vector3(camera.position))
+      this.camera.fov = camera.fov
+      this.camera.updateProjectionMatrix()
+      this.controls.target.copy(vector3(camera.target))
+      this.controls.update()
+    } finally {
+      this.applyingCamera = false
+    }
   }
 
   capture(): Promise<Blob | null> {
@@ -591,6 +618,7 @@ export class SceneRuntime {
   dispose(): void {
     this.disposed = true
     cancelAnimationFrame(this.animationFrame)
+    cancelAnimationFrame(this.cameraPreviewFrame)
     this.resizeObserver.disconnect()
     this.canvas.removeEventListener('pointerdown', this.handlePointerDown)
     this.canvas.removeEventListener('contextmenu', this.handleContextMenu)
@@ -609,10 +637,6 @@ export class SceneRuntime {
   private animate = (timestamp?: number): void => {
     if (this.disposed) return
     this.animationFrame = requestAnimationFrame(this.animate)
-    const now = timestamp ?? performance.now()
-    const minimumFrameTime = this.variant === 'display' ? 1000 / 30 : this.quality === 'low' ? 1000 / 30 : 0
-    if (minimumFrameTime && now - this.lastRenderedAt < minimumFrameTime) return
-    this.lastRenderedAt = now
     this.timer.update(timestamp)
     const delta = Math.min(this.timer.getDelta(), 1 / 20)
     this.controls.update()

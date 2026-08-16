@@ -12,7 +12,7 @@ import {
   shell,
   Tray
 } from 'electron'
-import type { AppSettings, BootstrapData, DisplayProject, DisplayResizeEdge, ProjectEvent, ProjectResetScope } from '../shared/types'
+import type { AppSettings, BootstrapData, CameraPreviewEvent, DisplayProject, DisplayResizeEdge, ProjectEvent, ProjectResetScope } from '../shared/types'
 import { ProjectStore } from './project-store'
 
 protocol.registerSchemesAsPrivileged([
@@ -257,6 +257,10 @@ function registerIpc(): void {
     const existing = latestProjectPreviews.get(project.id)
     if (!existing || existing.revision <= project.revision) latestProjectPreviews.set(project.id, structuredClone(project))
     broadcastExcept(event.sender, 'project:preview', project)
+  })
+  ipcMain.on('camera:preview', (event, preview: CameraPreviewEvent) => {
+    if (preview.projectId !== store.activeProjectId) return
+    broadcastExcept(event.sender, 'camera:preview', preview)
   })
   ipcMain.handle('project:export', async (_event, projectId: string) => {
     const project = await store.loadProject(projectId)
