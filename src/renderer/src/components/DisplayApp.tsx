@@ -1,0 +1,143 @@
+import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
+import type { DisplayResizeEdge } from '../../../shared/types'
+import { SceneView } from './SceneView'
+import { useAppStore } from '../store'
+
+export function DisplayApp(): React.JSX.Element | null {
+  const { t } = useTranslation()
+  const project = useAppStore((state) => state.project)
+  const settings = useAppStore((state) => state.settings)
+  const mutate = useAppStore((state) => state.mutateProject)
+  const [editing, setEditing] = useState(false)
+  const lastIgnored = useRef<boolean | null>(null)
+
+  useEffect(() => window.unvirtual.onDisplayEditingChanged(setEditing), [])
+
+  useEffect(() => {
+    if (!project || !settings || settings.clickThrough || editing) return
+    let frame = 0
+    let latestEvent: MouseEvent | null = null
+    const setIgnored = (ignored: boolean): void => {
+      if (lastIgnored.current === ignored) return
+      lastIgnored.current = ignored
+      window.unvirtual.setDisplayPointerIgnored(ignored)
+    }
+    const sample = (): void => {
+      frame = 0
+      const event = latestEvent
+      const canvas = document.querySelector<HTMLCanvasElement>('.display-shell .scene-canvas')
+      if (!event || !canvas) return
+      if (event.buttons !== 0) {
+        setIgnored(false)
+        return
+      }
+      if (project.background.mode !== 'transparent') {
+        setIgnored(false)
+        return
+      }
+      const context = canvas.getContext('webgl2')
+      if (!context) {
+        setIgnored(false)
+        return
+      }
+      const bounds = canvas.getBoundingClientRect()
+      const x = Math.max(0, Math.min(canvas.width - 1, Math.floor((event.clientX - bounds.left) * canvas.width / bounds.width)))
+      const y = Math.max(0, Math.min(canvas.height - 1, Math.floor((bounds.bottom - event.clientY) * canvas.height / bounds.height)))
+      const pixel = new Uint8Array(4)
+      context.readPixels(x, y, 1, 1, context.RGBA, context.UNSIGNED_BYTE, pixel)
+      setIgnored(pixel[3] < 12)
+    }
+    const handleMove = (event: MouseEvent): void => {
+      latestEvent = event
+      if (!frame) frame = requestAnimationFrame(sample)
+    }
+    if (project.background.mode !== 'transparent') {
+      lastIgnored.current = false
+      window.unvirtual.setDisplayPointerIgnored(false)
+    }
+    window.addEventListener('mousemove', handleMove, { passive: true })
+    return () => {
+      window.removeEventListener('mousemove', handleMove)
+      if (frame) cancelAnimationFrame(frame)
+      lastIgnored.current = null
+    }
+  }, [editing, project, settings])
+
+  if (!project || !settings) return null
+
+  const backgroundStyle: CSSProperties = (() => {
+    const background = project.background
+    if (background.mode === 'transparent') return { background: 'transparent' }
+    if (background.mode === 'solid') return { backgroundColor: background.color }
+    return {
+      backgroundColor: '#000000',
+      backgroundImage: background.imageUrl ? `url("${background.imageUrl}")` : undefined,
+      backgroundPosition: 'center',
+      backgroundRepeat: 'no-repeat',
+      backgroundSize: background.fit
+    }
+  })()
+
+  const toggleEditing = (): void => {
+    if (!editing && settings.clickThrough) return
+    void window.unvirtual.setDisplayEditing(!editing)
+  }
+
+  const beginResize = (edge: DisplayResizeEdge, event: ReactPointerEvent<HTMLDivElement>): void => {
+    event.preventDefault()
+    event.stopPropagation()
+    const handle = event.currentTarget
+    const pointerId = event.pointerId
+    handle.setPointerCapture(pointerId)
+    const move = (pointer: PointerEvent): void => window.unvirtual.updateDisplayResize({ x: pointer.screenX, y: pointer.screenY })
+    const finish = (): void => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', finish)
+      window.removeEventListener('pointercancel', finish)
+      if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId)
+      window.unvirtual.endDisplayResize()
+    }
+    window.unvirtual.startDisplayResize(edge, { x: event.screenX, y: event.screenY })
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', finish)
+    window.addEventListener('pointercancel', finish)
+  }
+
+  const beginMove = (event: ReactPointerEvent<HTMLElement>): void => {
+    if (event.button !== 0 || (event.target as HTMLElement).closest('button')) return
+    const handle = event.currentTarget
+    const pointerId = event.pointerId
+    handle.setPointerCapture(pointerId)
+    const move = (pointer: PointerEvent): void => window.unvirtual.updateDisplayMove({ x: pointer.screenX, y: pointer.screenY })
+    const finish = (): void => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', finish)
+      window.removeEventListener('pointercancel', finish)
+      if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId)
+      window.unvirtual.endDisplayMove()
+    }
+    window.unvirtual.startDisplayMove({ x: event.screenX, y: event.screenY })
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', finish)
+    window.addEventListener('pointercancel', finish)
+  }
+
+  return (
+    <main className={editing ? 'display-shell editing' : 'display-shell'} style={backgroundStyle} onPointerDown={beginMove} onDoubleClick={toggleEditing}>
+      <SceneView
+        project={project}
+        quality={settings.quality}
+        variant="display"
+        onCamera={(camera) => mutate((draft) => { draft.camera = camera }, false)}
+      />
+      {editing && <section className="widget-adjust-frame">
+        <button className="widget-adjust-done" onClick={() => void window.unvirtual.setDisplayEditing(false)}>{t('done')}</button>
+        {(['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'] as DisplayResizeEdge[]).map((edge) => (
+          <div key={edge} className={`widget-resize-handle ${edge}`} onPointerDown={(event) => beginResize(edge, event)} />
+        ))}
+      </section>}
+    </main>
+  )
+}

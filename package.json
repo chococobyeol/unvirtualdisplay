@@ -1,0 +1,112 @@
+{
+  "name": "unvirtual-display",
+  "version": "0.1.0",
+  "description": "A local-first desktop display case for 3D figures and 2D collectibles.",
+  "main": "./out/main/index.js",
+  "author": "Unvirtual Display",
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "npm run typecheck && electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "test": "vitest run",
+    "dist": "npm run build && electron-builder",
+    "dist:dir": "npm run build && electron-builder --dir",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:all": "npm run build && electron-builder --mac --win"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "0.20.0",
+    "@pixiv/three-vrm": "3.5.5",
+    "fflate": "0.8.2",
+    "i18next": "26.3.6",
+    "lucide-react": "^1.31.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-i18next": "17.0.11",
+    "three": "0.185.1",
+    "three-viewport-gizmo": "^2.2.0",
+    "zustand": "5.0.15"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.7",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.3",
+    "@types/three": "0.183.1",
+    "@vitejs/plugin-react": "4.7.0",
+    "electron": "43.4.0",
+    "electron-builder": "26.15.3",
+    "electron-vite": "3.1.0",
+    "png-to-ico": "3.0.2",
+    "typescript": "5.9.3",
+    "vite": "6.4.3",
+    "vitest": "4.1.10"
+  },
+  "build": {
+    "appId": "io.itch.unvirtualdisplay",
+    "productName": "Unvirtual Display",
+    "asar": true,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.entertainment",
+      "identity": null,
+      "icon": "build/icon.icns",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "extendInfo": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": false
+        }
+      }
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  }
+}
