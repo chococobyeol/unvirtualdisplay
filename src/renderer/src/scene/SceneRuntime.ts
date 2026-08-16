@@ -18,6 +18,7 @@ import type {
 } from '../../../shared/types'
 import { createDefaultDisplayTransform, DISPLAY_CASE_SELECTION_ID } from '../../../shared/types'
 import { cameraSettingsEqual } from '../../../shared/camera'
+import { findOpenImportPosition } from './itemPlacement'
 
 interface SceneCallbacks {
   onSelect: (id: string | null) => void
@@ -488,6 +489,7 @@ export class SceneRuntime {
   async syncProject(project: DisplayProject): Promise<void> {
     if (this.disposed) return
     const isNewProject = this.projectId !== project.id
+    const previousItemIds = new Set(this.project?.items.map((item) => item.id) ?? [])
     this.project = structuredClone(project)
     this.projectId = project.id
 
@@ -531,7 +533,8 @@ export class SceneRuntime {
       if (requiresReload) this.removeRuntimeItem(runtime, true)
       const current = this.items.get(item.id)
       if (!current && !this.pendingItemLoads.has(item.id)) {
-        void this.addItem(item)
+        const autoPlace = this.variant === 'editor' && !isNewProject && !previousItemIds.has(item.id)
+        void this.addItem(item, autoPlace)
       } else {
         if (current) this.syncRuntimeItem(current, item)
       }
@@ -805,7 +808,7 @@ export class SceneRuntime {
     this.staticBodies.push(body)
   }
 
-  private async addItem(item: DisplayItem): Promise<void> {
+  private async addItem(item: DisplayItem, autoPlace = false): Promise<void> {
     const loadToken = Symbol(item.id)
     this.pendingItemLoads.set(item.id, loadToken)
     let loaded: RuntimeItem | null = null
@@ -832,15 +835,30 @@ export class SceneRuntime {
     ) {
       if (loaded) disposeObject(loaded.root)
       if (!this.disposed && latest && !this.items.has(item.id) && !this.pendingItemLoads.has(item.id)) {
-        void this.addItem(latest)
+        void this.addItem(latest, autoPlace)
       }
       return
+    }
+
+    const placedItem = cloneItem(latest)
+    if (autoPlace) {
+      const occupied = [...this.items.values()]
+        .filter((runtime) => runtime.snapshot.visible !== false)
+        .map((runtime) => {
+          runtime.root.updateMatrix()
+          return runtime.bounds.clone().applyMatrix4(runtime.root.matrix)
+        })
+      const position = findOpenImportPosition(loaded.bounds, placedItem.transform, occupied)
+      placedItem.transform.position = { x: position.x, y: position.y, z: position.z }
+      const localItem = this.project?.items.find((candidate) => candidate.id === item.id)
+      if (localItem) localItem.transform = structuredClone(placedItem.transform)
     }
 
     loaded.root.userData.itemId = item.id
     this.itemLayer.add(loaded.root)
     this.items.set(item.id, loaded)
-    this.syncRuntimeItem(loaded, latest, true)
+    this.syncRuntimeItem(loaded, placedItem, true)
+    if (autoPlace) this.callbacks.onTransform(item.id, placedItem.transform, false)
     if (this.selectedId === item.id) this.setSelection(item.id)
     this.settlementReported = false
   }
