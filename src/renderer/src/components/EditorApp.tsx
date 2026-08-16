@@ -100,17 +100,65 @@ function Toggle({ checked, onChange, label, hint }: {
   )
 }
 
-function LightDirectionControl({ azimuth, elevation, label, hint, onChange }: {
+const normalizeAzimuth = (value: number): number => ((Math.round(value) % 360) + 360) % 360
+
+function LightDirectionControl({
+  azimuth,
+  elevation,
+  label,
+  horizontalLabel,
+  horizontalHint,
+  heightLabel,
+  heightHint,
+  heightMapHint,
+  frontLabel,
+  rightLabel,
+  backLabel,
+  leftLabel,
+  hint,
+  resetLabel,
+  resetText,
+  onChange
+}: {
   azimuth: number
   elevation: number
   label: string
+  horizontalLabel: string
+  horizontalHint: string
+  heightLabel: string
+  heightHint: string
+  heightMapHint: string
+  frontLabel: string
+  rightLabel: string
+  backLabel: string
+  leftLabel: string
   hint: string
+  resetLabel: string
+  resetText: string
   onChange: (azimuth: number, elevation: number) => void
 }): React.JSX.Element {
-  const radial = Math.min(1, Math.max(0, (85 - elevation) / 70))
+  const [open, setOpen] = useState(false)
+  const controlRef = useRef<HTMLDivElement>(null)
+  const radial = Math.min(1, Math.max(0, (90 - elevation) / 90))
   const azimuthRadians = azimuth * Math.PI / 180
   const dotLeft = 50 + Math.sin(azimuthRadians) * radial * 38
   const dotTop = 50 - Math.cos(azimuthRadians) * radial * 38
+
+  useEffect(() => {
+    if (!open) return
+    const closeFromOutside = (event: PointerEvent): void => {
+      if (!controlRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    const closeFromKeyboard = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('pointerdown', closeFromOutside)
+    window.addEventListener('keydown', closeFromKeyboard)
+    return () => {
+      window.removeEventListener('pointerdown', closeFromOutside)
+      window.removeEventListener('keydown', closeFromKeyboard)
+    }
+  }, [open])
 
   const updateFromPointer = (event: ReactPointerEvent<HTMLButtonElement>): void => {
     const bounds = event.currentTarget.getBoundingClientRect()
@@ -124,8 +172,8 @@ function LightDirectionControl({ azimuth, elevation, label, hint, onChange }: {
     }
     const clampedDistance = Math.min(1, distance)
     const nextAzimuth = clampedDistance < 0.04 ? azimuth : Math.atan2(x, -y) * 180 / Math.PI
-    const nextElevation = 85 - clampedDistance * 70
-    onChange(Math.round(nextAzimuth), Math.round(nextElevation))
+    const nextElevation = 90 - clampedDistance * 90
+    onChange(normalizeAzimuth(nextAzimuth), Math.round(nextElevation))
   }
 
   const beginDrag = (event: ReactPointerEvent<HTMLButtonElement>): void => {
@@ -153,37 +201,98 @@ function LightDirectionControl({ azimuth, elevation, label, hint, onChange }: {
     else if (event.key === 'ArrowDown') nextElevation -= 5
     else return
     event.preventDefault()
-    nextAzimuth = ((nextAzimuth + 180) % 360 + 360) % 360 - 180
-    onChange(nextAzimuth, Math.min(85, Math.max(15, nextElevation)))
+    onChange(normalizeAzimuth(nextAzimuth), Math.min(90, Math.max(0, nextElevation)))
   }
 
   return (
-    <div className="light-direction-row">
+    <div className="light-direction-row" ref={controlRef}>
       <span>{label}</span>
       <button
         type="button"
-        className="light-direction-pad"
+        className={`light-direction-summary ${open ? 'open' : ''}`}
         title={hint}
         aria-label={label}
+        aria-haspopup="dialog"
+        aria-expanded={open}
         aria-valuetext={`${Math.round(azimuth)}°, ${Math.round(elevation)}°`}
-        onPointerDown={beginDrag}
-        onPointerMove={continueDrag}
-        onPointerUp={endDrag}
-        onPointerCancel={endDrag}
-        onKeyDown={adjustWithKeyboard}
+        onClick={() => setOpen((current) => !current)}
       >
-        <i style={{ left: `${dotLeft}%`, top: `${dotTop}%` }} />
+        <span className="light-direction-mini" aria-hidden="true"><i style={{ left: `${dotLeft}%`, top: `${dotTop}%` }} /></span>
+        <span className="light-direction-value"><small>{horizontalLabel}</small><b>{Math.round(azimuth)}°</b></span>
+        <span className="light-direction-divider" aria-hidden="true" />
+        <span className="light-direction-value"><small>{heightLabel}</small><b>{Math.round(elevation)}°</b></span>
+        <span className="light-direction-caret" aria-hidden="true" />
       </button>
-      <b>{Math.round(azimuth)}° · {Math.round(elevation)}°</b>
+      {open && <section className="light-direction-popover" role="dialog" aria-label={label}>
+        <header>
+          <strong>{label}</strong>
+          <button type="button" className="light-direction-reset" title={resetLabel} aria-label={resetLabel} onClick={() => onChange(30, 45)}>
+            <Icon name="reset" /><span>{resetText}</span>
+          </button>
+        </header>
+        <div className="light-direction-popover-body">
+          <div className="light-direction-compass">
+            <span className="compass-label front"><b>0°</b><small>{frontLabel}</small></span>
+            <span className="compass-label right"><b>90°</b><small>{rightLabel}</small></span>
+            <span className="compass-label back"><b>180°</b><small>{backLabel}</small></span>
+            <span className="compass-label left"><b>270°</b><small>{leftLabel}</small></span>
+            <button
+              type="button"
+              className="light-direction-pad"
+              title={hint}
+              aria-label={label}
+              aria-valuetext={`${Math.round(azimuth)}°, ${Math.round(elevation)}°`}
+              onPointerDown={beginDrag}
+              onPointerMove={continueDrag}
+              onPointerUp={endDrag}
+              onPointerCancel={endDrag}
+              onKeyDown={adjustWithKeyboard}
+            >
+              <i style={{ left: `${dotLeft}%`, top: `${dotTop}%` }} />
+            </button>
+          </div>
+          <div className="light-direction-fields">
+            <label className="light-direction-field">
+              <span><strong>{horizontalLabel}</strong><small>{horizontalHint}</small></span>
+              <span className="light-angle-input">
+                <NumberField
+                  value={Math.round(azimuth)}
+                  step={5}
+                  ariaLabel={horizontalLabel}
+                  normalize={normalizeAzimuth}
+                  suffix="°"
+                  onChange={(value) => onChange(normalizeAzimuth(value), elevation)}
+                />
+              </span>
+            </label>
+            <label className="light-direction-field">
+              <span><strong>{heightLabel}</strong><small>{heightHint}</small></span>
+              <span className="light-angle-input">
+                <NumberField
+                  value={Math.round(elevation)}
+                  step={5}
+                  ariaLabel={heightLabel}
+                  normalize={(value) => Math.min(90, Math.max(0, Math.round(value)))}
+                  suffix="°"
+                  onChange={(value) => onChange(azimuth, Math.min(90, Math.max(0, Math.round(value))))}
+                />
+              </span>
+            </label>
+            <p>{heightMapHint}</p>
+          </div>
+        </div>
+      </section>}
     </div>
   )
 }
 
-function NumberField({ value, onChange, step = 0.1, ariaLabel }: {
+function NumberField({ value, onChange, step = 0.1, ariaLabel, normalize, suffix }: {
   value: number
   onChange: (value: number) => void
   step?: number
   ariaLabel: string
+  normalize?: (value: number) => number
+  suffix?: string
 }): React.JSX.Element {
   const format = (next: number): string => Number(next.toFixed(3)).toString()
   const [draft, setDraft] = useState(format(value))
@@ -193,7 +302,8 @@ function NumberField({ value, onChange, step = 0.1, ariaLabel }: {
   }, [focused, value])
 
   const apply = (next: number): void => {
-    const rounded = Number(next.toFixed(6))
+    const normalized = normalize ? normalize(next) : next
+    const rounded = Number(normalized.toFixed(6))
     setDraft(format(rounded))
     onChange(rounded)
   }
@@ -221,7 +331,7 @@ function NumberField({ value, onChange, step = 0.1, ariaLabel }: {
           const nextDraft = event.target.value
           setDraft(nextDraft)
           const next = Number(nextDraft)
-          if (nextDraft.trim() && Number.isFinite(next)) onChange(next)
+          if (nextDraft.trim() && Number.isFinite(next)) onChange(normalize ? normalize(next) : next)
         }}
         onKeyDown={(event) => {
           if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
@@ -236,6 +346,7 @@ function NumberField({ value, onChange, step = 0.1, ariaLabel }: {
           }
         }}
       />
+      {suffix && <span className="number-suffix" aria-hidden="true">{suffix}</span>}
       <span className="number-steppers">
         <button type="button" tabIndex={-1} aria-label={`${ariaLabel} +`} onPointerDown={(event) => event.preventDefault()} onClick={() => nudge(1)} />
         <button type="button" tabIndex={-1} aria-label={`${ariaLabel} -`} onPointerDown={(event) => event.preventDefault()} onClick={() => nudge(-1)} />
@@ -586,7 +697,18 @@ export function EditorApp(): React.JSX.Element | null {
             azimuth={project.lighting.azimuth}
             elevation={project.lighting.elevation}
             label={t('lightDirection')}
+            horizontalLabel={t('lightAzimuth')}
+            horizontalHint={t('lightAzimuthHint')}
+            heightLabel={t('lightElevation')}
+            heightHint={t('lightElevationHint')}
+            heightMapHint={t('lightElevationMapHint')}
+            frontLabel={t('front')}
+            rightLabel={t('right')}
+            backLabel={t('back')}
+            leftLabel={t('left')}
             hint={t('lightDirectionHint')}
+            resetLabel={t('resetLightDirection')}
+            resetText={t('resetDisplay')}
             onChange={(azimuth, elevation) => mutate((draft) => {
               draft.lighting.azimuth = azimuth
               draft.lighting.elevation = elevation

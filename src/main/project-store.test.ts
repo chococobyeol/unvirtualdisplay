@@ -47,6 +47,19 @@ describe('ProjectStore', () => {
     expect(saved.project.lighting.elevation).toBe(45)
   })
 
+  it('normalizes light direction to intuitive degree ranges', async () => {
+    const store = await createStore()
+    const project = await store.getActiveProject()
+    project.lighting.azimuth = -10
+    project.lighting.elevation = 120
+    project.revision += 1
+
+    const saved = await store.saveProject(project)
+
+    expect(saved.project.lighting.azimuth).toBe(350)
+    expect(saved.project.lighting.elevation).toBe(90)
+  })
+
   it('saves, duplicates, activates and deletes projects', async () => {
     const store = await createStore()
     const original = await store.getActiveProject()

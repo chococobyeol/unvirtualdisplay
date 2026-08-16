@@ -61,6 +61,9 @@ function normalizeProject(project: DisplayProject): DisplayProject {
   const displayTransform = project.displayTransform ?? createDefaultDisplayTransform()
   const defaultLighting = createDefaultLightingSettings()
   const lighting = project.lighting ?? defaultLighting
+  const normalizedAzimuth = Number.isFinite(lighting.azimuth)
+    ? ((Math.round(lighting.azimuth) % 360) + 360) % 360
+    : defaultLighting.azimuth
   return {
     ...project,
     schemaVersion: 1,
@@ -71,8 +74,8 @@ function normalizeProject(project: DisplayProject): DisplayProject {
       intensity: Number.isFinite(lighting.intensity) ? Math.min(2, Math.max(0.25, lighting.intensity)) : defaultLighting.intensity,
       warmth: Number.isFinite(lighting.warmth) ? Math.min(1, Math.max(0, lighting.warmth)) : defaultLighting.warmth,
       shadows: lighting.shadows !== false,
-      azimuth: Number.isFinite(lighting.azimuth) ? Math.min(180, Math.max(-180, lighting.azimuth)) : defaultLighting.azimuth,
-      elevation: Number.isFinite(lighting.elevation) ? Math.min(85, Math.max(15, lighting.elevation)) : defaultLighting.elevation
+      azimuth: normalizedAzimuth,
+      elevation: Number.isFinite(lighting.elevation) ? Math.min(90, Math.max(0, Math.round(lighting.elevation))) : defaultLighting.elevation
     },
     background: {
       mode: ['transparent', 'solid', 'image'].includes(background.mode) ? background.mode : 'transparent',
