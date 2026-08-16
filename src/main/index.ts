@@ -9,11 +9,13 @@ import {
   nativeImage,
   net,
   protocol,
+  screen,
   shell,
   Tray
 } from 'electron'
 import type { AppSettings, BootstrapData, CameraPreviewEvent, DisplayProject, DisplayResizeEdge, ProjectEvent, ProjectResetScope } from '../shared/types'
 import { ProjectStore } from './project-store'
+import { getDefaultDisplayBounds } from './window-bounds'
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -303,7 +305,7 @@ async function ensureDisplayWindow(): Promise<BrowserWindow> {
 
 async function createDisplayWindow(): Promise<BrowserWindow> {
   const settings = store.settings
-  const bounds = settings.displayBounds ?? { width: 760, height: 560 }
+  const bounds = settings.displayBounds ?? getDefaultDisplayBounds(screen.getPrimaryDisplay().workArea)
   const window = new BrowserWindow({
     title: 'Unvirtual Display',
     ...bounds,
@@ -324,7 +326,7 @@ async function createDisplayWindow(): Promise<BrowserWindow> {
   window.setIgnoreMouseEvents(settings.clickThrough, { forward: true })
   attachDiagnostics(window, 'display')
   window.once('ready-to-show', () => {
-    if (displayVisible && !isQuitting && !window.isDestroyed()) window.showInactive()
+    if (displayVisible && settings.onboardingComplete && !isQuitting && !window.isDestroyed()) window.showInactive()
     publishDisplayVisibility()
   })
   window.on('show', publishDisplayVisibility)
@@ -519,9 +521,11 @@ function registerIpc(): void {
   })
 
   ipcMain.handle('settings:update', async (_event, patch: Partial<AppSettings>) => {
+    const completingOnboarding = !store.settings.onboardingComplete && patch.onboardingComplete === true
     const settings = await store.updateSettings(patch)
     applyDisplaySettings(settings)
     broadcast('settings:changed', { settings })
+    if (completingOnboarding) await setDisplayWindowVisible(true)
     refreshTrayMenu()
     return settings
   })

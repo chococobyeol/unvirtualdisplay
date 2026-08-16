@@ -1165,7 +1165,7 @@ export function EditorApp(): React.JSX.Element | null {
             onTransform={updateTransform}
             onCamera={(camera) => mutate((draft) => { draft.camera = camera }, false)}
             cameraResetKey={cameraResetKey}
-            onResetCamera={resetCamera}
+            onResetCamera={settings.onboardingComplete ? resetCamera : undefined}
             resetCameraLabel={t('resetCamera')}
           />
           <div className="scene-caption">{t('sceneHelp')}</div>

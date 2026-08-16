@@ -136,15 +136,15 @@ const resources = {
       version: '버전 {{version}}',
       sceneHelp: '클릭해서 선택 · 드래그로 이동 · 우클릭 드래그로 회전 · 휠로 확대',
       physicsSettling: '중력으로 전시물을 안착시키는 중…',
-      welcomeTitle: '내 파일로 만드는 작은 전시 공간',
-      welcomeCopy: '모델과 이미지는 이 기기에만 저장됩니다. 계정이나 업로드는 필요하지 않아요.',
-      welcomeImport: '파일을 넣어요',
-      welcomeImportCopy: '3D 모델 또는 이미지를 가져오면 보기 좋은 크기로 맞춰집니다.',
-      welcomeArrange: '자유롭게 진열해요',
-      welcomeArrangeCopy: '겹치거나 쌓아도 되고, 중력과 넘어짐 방지가 배치를 도와줍니다.',
-      welcomeDisplay: '전시창으로 감상해요',
-      welcomeDisplayCopy: '편집창을 최소화하면 투명 전시창만 데스크톱에 남아 있습니다.',
-      startCreating: '첫 진열장 시작하기'
+      welcomeTitle: 'Unvirtual Display 시작하기',
+      welcomeCopy: '3D 모델과 이미지를 바탕화면에 진열하세요. 파일과 설정은 이 기기에만 저장됩니다.',
+      welcomeImport: '전시물 추가',
+      welcomeImportCopy: '3D 모델이나 이미지를 불러오면 진열장 크기에 맞게 조정됩니다.',
+      welcomeArrange: '배치 및 조정',
+      welcomeArrangeCopy: '전시물의 위치, 각도, 크기를 조정하세요. 서로 겹치거나 쌓을 수도 있습니다.',
+      welcomeDisplay: '위젯 사용',
+      welcomeDisplayCopy: '편집창과 별도로 위젯을 표시하거나 숨길 수 있습니다.',
+      startCreating: '시작하기'
     }
   },
   en: {
@@ -176,11 +176,11 @@ const resources = {
       saving: 'Saving…', saved: 'Saved locally', loading: 'Preparing your display…', importFailed: 'Could not import the files.',
       deleteConfirm: 'Delete this display?', lastProject: 'The last display cannot be deleted.', removeItem: 'Remove item', showItem: 'Show item', hideItem: 'Hide item', showCase: 'Show display case', hideCase: 'Hide display case',
       version: 'Version {{version}}', sceneHelp: 'Click to select · Drag to pan · Right-drag to orbit · Wheel to zoom',
-      physicsSettling: 'Settling items with gravity…', welcomeTitle: 'A small gallery made from your files',
-      welcomeCopy: 'Models and images stay on this device. No account or upload is needed.', welcomeImport: 'Bring in your files',
-      welcomeImportCopy: 'Models and images are normalized to a display-friendly size.', welcomeArrange: 'Arrange without slots',
-      welcomeArrangeCopy: 'Overlap or stack items while gravity and prevent-toppling help.', welcomeDisplay: 'Enjoy the display window',
-      welcomeDisplayCopy: 'Minimize the editor to leave only the transparent display on your desktop.', startCreating: 'Start my first display'
+      physicsSettling: 'Settling items with gravity…', welcomeTitle: 'Getting started with Unvirtual Display',
+      welcomeCopy: 'Display 3D models and images on your desktop. Files and settings stay on this device.', welcomeImport: 'Add items',
+      welcomeImportCopy: 'Imported models and images are scaled to fit the display.', welcomeArrange: 'Arrange and adjust',
+      welcomeArrangeCopy: 'Adjust the position, rotation, and size. Items can overlap or stack.', welcomeDisplay: 'Use the widget',
+      welcomeDisplayCopy: 'Show or hide the widget independently of the editor.', startCreating: 'Get started'
     }
   },
   ja: {
@@ -212,11 +212,11 @@ const resources = {
       saved: 'ローカルに保存済み', loading: 'ディスプレイを準備中…', importFailed: 'ファイルを読み込めませんでした。',
       deleteConfirm: 'このディスプレイを削除しますか？', lastProject: '最後のディスプレイは削除できません。', removeItem: '展示物を削除', showItem: '展示物を表示', hideItem: '展示物を非表示', showCase: 'ケースを表示', hideCase: 'ケースを非表示',
       version: 'バージョン {{version}}', sceneHelp: 'クリックで選択・ドラッグで移動・右ドラッグで回転・ホイールでズーム',
-      physicsSettling: '重力で展示物を配置中…', welcomeTitle: '自分のファイルで作る小さな展示空間',
-      welcomeCopy: 'モデルと画像はこの端末だけに保存されます。アカウントやアップロードは不要です。', welcomeImport: 'ファイルを追加',
-      welcomeImportCopy: '3Dモデルや画像を展示しやすいサイズに自動調整します。', welcomeArrange: '自由に配置',
-      welcomeArrangeCopy: '重ねたり積んだりでき、重力と転倒防止が配置を助けます。', welcomeDisplay: '展示ウィンドウで鑑賞',
-      welcomeDisplayCopy: '編集画面を最小化すると、透明な展示ウィンドウだけがデスクトップに残ります。', startCreating: '最初の展示を始める'
+      physicsSettling: '重力で展示物を配置中…', welcomeTitle: 'Unvirtual Displayを始める',
+      welcomeCopy: '3Dモデルや画像をデスクトップに飾れます。ファイルと設定はこの端末に保存されます。', welcomeImport: '展示物を追加',
+      welcomeImportCopy: '読み込んだモデルや画像は、ケースに収まる大きさに調整されます。', welcomeArrange: '配置を調整',
+      welcomeArrangeCopy: '位置、角度、サイズを調整できます。重ねたり積んだりすることもできます。', welcomeDisplay: 'ウィジェットを使う',
+      welcomeDisplayCopy: '編集画面とは別に、ウィジェットの表示と非表示を切り替えられます。', startCreating: '始める'
     }
   },
   'zh-Hans': {
@@ -243,11 +243,11 @@ const resources = {
       lightDirectionHint: '水平角0°为正面，90°为右侧；高度0°为水平，90°为正上方。', resetLightDirection: '重置灯光方向', shadows: '阴影', saving: '正在保存…', saved: '已保存到本地', loading: '正在准备展示柜…',
       importFailed: '无法导入文件。', deleteConfirm: '要删除这个展示柜吗？', lastProject: '无法删除最后一个展示柜。',
       removeItem: '删除展品', showItem: '显示展品', hideItem: '隐藏展品', showCase: '显示展示柜', hideCase: '隐藏展示柜', version: '版本 {{version}}', sceneHelp: '单击选择 · 拖动平移 · 右键拖动旋转 · 滚轮缩放',
-      physicsSettling: '正在通过重力放置展品…', welcomeTitle: '用自己的文件打造小型展览空间',
-      welcomeCopy: '模型和图片只保存在本机，无需账号或上传。', welcomeImport: '导入文件',
-      welcomeImportCopy: '3D 模型和图片会自动调整为适合展示的大小。', welcomeArrange: '自由陈列',
-      welcomeArrangeCopy: '可以重叠或堆放，重力和防倾倒功能会帮助你。', welcomeDisplay: '在展示窗口中欣赏',
-      welcomeDisplayCopy: '最小化编辑器后，桌面上只保留透明展示窗口。', startCreating: '开始第一个展示柜'
+      physicsSettling: '正在通过重力放置展品…', welcomeTitle: '开始使用 Unvirtual Display',
+      welcomeCopy: '在桌面上陈列 3D 模型和图片。文件和设置都保存在本机。', welcomeImport: '添加展品',
+      welcomeImportCopy: '导入的模型和图片会缩放到适合展示柜的大小。', welcomeArrange: '调整布局',
+      welcomeArrangeCopy: '调整展品的位置、角度和大小，也可以重叠或堆放。', welcomeDisplay: '使用小组件',
+      welcomeDisplayCopy: '小组件可以独立于编辑器显示或隐藏。', startCreating: '开始'
     }
   }
 } as const
