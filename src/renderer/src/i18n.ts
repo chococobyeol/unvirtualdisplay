@@ -10,6 +10,7 @@ const resources = {
       import: '전시물 가져오기',
       projects: '진열장',
       displayName: '진열장 이름',
+      renameDisplayHint: '더블클릭하여 이름 변경',
       newProject: '새 진열장',
       duplicate: '복제',
       delete: '삭제',
@@ -132,7 +133,7 @@ const resources = {
   },
   en: {
     translation: {
-      appName: 'Unvirtual Display', editor: 'Display editor', import: 'Import items', projects: 'Displays', displayName: 'Display name',
+      appName: 'Unvirtual Display', editor: 'Display editor', import: 'Import items', projects: 'Displays', displayName: 'Display name', renameDisplayHint: 'Double-click to rename',
       newProject: 'New display', duplicate: 'Duplicate', delete: 'Delete', backup: 'Export', restore: 'Import', clearDisplay: 'Clear', resetDisplay: 'Reset', resetCamera: 'Reset camera',
       clearConfirm: 'Remove every item? Model and image files copied into this display will also be deleted.',
       resetConfirm: 'Reset this display to its initial state? Items, camera, case, and lighting settings will be reset.', capture: 'Save PNG', diagnostics: 'Export diagnostics', untitled: 'My display', items: 'Items',
@@ -168,7 +169,7 @@ const resources = {
   },
   ja: {
     translation: {
-      appName: 'Unvirtual Display', editor: 'ディスプレイ編集', import: 'アイテムを追加', projects: 'ディスプレイ', displayName: 'ディスプレイ名',
+      appName: 'Unvirtual Display', editor: 'ディスプレイ編集', import: 'アイテムを追加', projects: 'ディスプレイ', displayName: 'ディスプレイ名', renameDisplayHint: 'ダブルクリックで名前を変更',
       newProject: '新規作成', duplicate: '複製', delete: '削除', backup: 'エクスポート', restore: 'インポート', clearDisplay: '空にする', resetDisplay: '初期化', resetCamera: 'カメラをリセット',
       clearConfirm: '展示物をすべて削除しますか？このディスプレイにコピーされたモデルと画像も削除されます。',
       resetConfirm: 'ディスプレイを初期状態に戻しますか？展示物、カメラ、ケース、照明の設定が初期化されます。', capture: 'PNG保存', diagnostics: '診断ログを保存', untitled: 'マイディスプレイ', items: '展示物',
@@ -204,7 +205,7 @@ const resources = {
   },
   'zh-Hans': {
     translation: {
-      appName: 'Unvirtual Display', editor: '展示柜编辑器', import: '导入展品', projects: '展示柜', displayName: '展示柜名称', newProject: '新建展示柜',
+      appName: 'Unvirtual Display', editor: '展示柜编辑器', import: '导入展品', projects: '展示柜', displayName: '展示柜名称', renameDisplayHint: '双击重命名', newProject: '新建展示柜',
       duplicate: '复制', delete: '删除', backup: '导出', restore: '导入', clearDisplay: '清空', resetDisplay: '重置', resetCamera: '重置相机',
       clearConfirm: '要移除所有展品吗？复制到此展示柜中的模型和图片文件也会被删除。',
       resetConfirm: '要将展示柜恢复到初始状态吗？展品、相机、展示柜和灯光设置都会被重置。', capture: '保存 PNG', diagnostics: '导出诊断日志', untitled: '我的展示柜', items: '展品', emptyItems: '将 3D 模型或图片拖到这里',

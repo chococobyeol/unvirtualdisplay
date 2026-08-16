@@ -58,11 +58,14 @@ button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke
 .project-list { max-height: 178px; }
 .project-card, .item-row { border: 1px solid transparent; background: transparent; text-align: left; cursor: pointer; display: flex; align-items: center; gap: 9px; min-width: 0; }
 .project-card { padding: 7px; border-radius: 8px; }
+.project-card.editing { cursor: default; }
 .project-card:hover, .project-card.active { background: rgba(255,255,255,.035); }
 .project-card.active { border-color: rgba(231, 184, 114, .24); background: var(--accent-soft); }
 .project-card > span:last-child, .item-row-main > span:last-child { display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
 .project-card b, .item-row b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 550; }
 .project-card small, .item-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--muted); margin-top: 2px; }
+.project-card-name-input { width: 100%; min-width: 0; height: 21px; padding: 0 5px; border: 1px solid rgba(231,184,114,.48); border-radius: 4px; background: #211e1a; color: #eee9df; font-size: 13px; font-weight: 550; cursor: text; }
+.project-card-name-input:focus { border-color: rgba(231,184,114,.78); background: #28231d; }
 .project-thumb { width: 38px; height: 31px; display: grid; place-items: center; flex: none; color: #91806b; border: 1px solid var(--line-strong); border-radius: 5px; background: linear-gradient(#26231f, #181715); overflow: hidden; }
 .project-thumb .display-case-glyph { width: 32px; height: 26px; }
 .project-card.active .project-thumb { color: #b89b72; border-color: rgba(231,184,114,.25); }
@@ -102,12 +105,7 @@ button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke
 .case-dot .display-case-glyph { width: 23px; height: 19px; }
 .case-selection-title { display: flex; align-items: center; gap: 9px; margin: 2px 0 16px; color: #ddd7ce; font-size: 13px; }
 .muted-copy { color: var(--muted); font-size: 12px; line-height: 1.45; margin: 4px 6px; }
-.project-name, .item-name-input { border: 0; border-top: 1px solid var(--line); color: #d8d2c8; background: rgba(0,0,0,.12); padding: 12px 15px; width: 100%; font-size: 13px; }
-.project-name-editor { display: block; padding: 10px 12px 12px; border-top: 1px solid var(--line); background: rgba(0,0,0,.12); }
-.project-name-editor > span { display: block; margin: 0 2px 6px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .09em; }
-.project-name-editor .project-name { height: 31px; border: 1px solid var(--line-strong); border-radius: 6px; background: #211f1c; padding: 0 9px; }
-.project-name-editor .project-name:hover { border-color: rgba(231,184,114,.35); }
-.project-name-editor .project-name:focus { border-color: rgba(231,184,114,.65); background: #27231e; }
+.item-name-input { border: 0; border-top: 1px solid var(--line); color: #d8d2c8; background: rgba(0,0,0,.12); padding: 12px 15px; width: 100%; font-size: 13px; }
 
 .workspace { display: grid; grid-template-rows: 58px minmax(0, 1fr) 48px; min-width: 0; min-height: 0; }
 .toolbar { min-width: 0; white-space: nowrap; border-bottom: 1px solid var(--line); display: flex; align-items: center; padding: 0 12px; gap: 10px; z-index: 1; }

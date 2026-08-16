@@ -246,6 +246,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     next.updatedAt = new Date().toISOString()
     set({
       project: next,
+      projects: summariesWithCurrent(get().projects, next),
       saveStatus: 'saving',
       history: remember ? [...get().history.slice(-49), current] : get().history,
       future: remember ? [] : get().future

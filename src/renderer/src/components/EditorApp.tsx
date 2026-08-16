@@ -29,6 +29,7 @@ import type {
   DisplayProject,
   ImageDisplayType,
   Language,
+  ProjectSummary,
   QualityPreset,
   TransformMode,
   Vec3
@@ -391,6 +392,25 @@ function ProjectRail({ project, projects }: { project: DisplayProject; projects:
   const mutate = useAppStore((state) => state.mutateProject)
   const selectedId = useAppStore((state) => state.selectedItemId)
   const select = useAppStore((state) => state.setSelectedItem)
+  const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null)
+  const [projectNameDraft, setProjectNameDraft] = useState('')
+  const cancelProjectRename = useRef(false)
+  const beginProjectRename = (summary: ProjectSummary): void => {
+    cancelProjectRename.current = false
+    setProjectNameDraft(summary.name)
+    setRenamingProjectId(summary.id)
+  }
+  const finishProjectRename = async (summary: ProjectSummary): Promise<void> => {
+    const cancelled = cancelProjectRename.current
+    cancelProjectRename.current = false
+    setRenamingProjectId(null)
+    if (cancelled) return
+
+    const name = projectNameDraft.trim()
+    if (!name || name === summary.name) return
+    if (useAppStore.getState().project?.id !== summary.id) await activate(summary.id)
+    mutate((draft) => { draft.name = name })
+  }
   const toggleItemVisibility = (id: string): void => mutate((draft) => {
     const item = draft.items.find((candidate) => candidate.id === id)
     if (item) item.visible = item.visible === false
@@ -409,12 +429,48 @@ function ProjectRail({ project, projects }: { project: DisplayProject; projects:
       <section className="panel-section grow">
         <div className="section-heading"><h2>{t('projects')}</h2><button className="icon-button" onClick={() => void create()} title={t('newProject')}><Icon name="plus" /></button></div>
         <div className="project-list">
-          {projects.map((summary) => (
-            <button key={summary.id} className={summary.id === project.id ? 'project-card active' : 'project-card'} onClick={() => void activate(summary.id)}>
+          {projects.map((summary) => renamingProjectId === summary.id
+            ? <div key={summary.id} className={`project-card editing${summary.id === project.id ? ' active' : ''}`}>
+              <span className="project-thumb"><DisplayCaseGlyph /></span>
+              <span className="project-card-editor">
+                <input
+                  className="project-card-name-input"
+                  value={projectNameDraft}
+                  aria-label={t('displayName')}
+                  maxLength={80}
+                  autoFocus
+                  onFocus={(event) => event.currentTarget.select()}
+                  onChange={(event) => setProjectNameDraft(event.target.value)}
+                  onBlur={() => void finishProjectRename(summary)}
+                  onDoubleClick={(event) => event.stopPropagation()}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      event.currentTarget.blur()
+                    } else if (event.key === 'Escape') {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      cancelProjectRename.current = true
+                      event.currentTarget.blur()
+                    }
+                  }}
+                />
+                <small>{summary.itemCount} {t('items').toLowerCase()}</small>
+              </span>
+            </div>
+            : <button
+              key={summary.id}
+              className={summary.id === project.id ? 'project-card active' : 'project-card'}
+              title={t('renameDisplayHint')}
+              onClick={(event) => {
+                if (event.detail === 1 && summary.id !== project.id) void activate(summary.id)
+              }}
+              onDoubleClick={() => beginProjectRename(summary)}
+            >
               <span className="project-thumb"><DisplayCaseGlyph /></span>
               <span><b>{summary.name}</b><small>{summary.itemCount} {t('items').toLowerCase()}</small></span>
-            </button>
-          ))}
+            </button>)}
         </div>
       </section>
       <div className="rail-actions">
@@ -464,10 +520,6 @@ function ProjectRail({ project, projects }: { project: DisplayProject; projects:
           ))}
         </div>
       </section>
-      <label className="project-name-editor">
-        <span>{t('displayName')}</span>
-        <input className="project-name" value={project.name} aria-label={t('displayName')} onChange={(event) => mutate((draft) => { draft.name = event.target.value })} />
-      </label>
     </aside>
   )
 }
