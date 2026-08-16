@@ -57,15 +57,15 @@ button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke
 .project-list, .item-list { display: flex; flex-direction: column; gap: 4px; overflow: auto; }
 .project-list { max-height: 178px; }
 .project-card, .item-row { border: 1px solid transparent; background: transparent; text-align: left; cursor: pointer; display: flex; align-items: center; gap: 9px; min-width: 0; }
-.project-card { padding: 7px; border-radius: 8px; }
+.project-card { height: 48px; flex: none; padding: 7px; border-radius: 8px; }
 .project-card.editing { cursor: default; }
 .project-card:hover, .project-card.active { background: rgba(255,255,255,.035); }
 .project-card.active { border-color: rgba(231, 184, 114, .24); background: var(--accent-soft); }
 .project-card > span:last-child, .item-row-main > span:last-child { display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
 .project-card b, .item-row b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 550; }
 .project-card small, .item-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--muted); margin-top: 2px; }
-.project-card-editor { height: 31px; }
-.project-card-editor small { margin-top: 1px; line-height: 11px; }
+.project-card-editor { height: 32px; }
+.project-card-editor small { margin-top: 2px; line-height: 11px; }
 .project-card-name-input { width: 100%; min-width: 0; height: 19px; flex: none; padding: 0 5px; border: 1px solid rgba(231,184,114,.48); border-radius: 4px; background: #211e1a; color: #eee9df; font-size: 13px; font-weight: 550; line-height: 17px; cursor: text; }
 .project-card-name-input:focus { border-color: rgba(231,184,114,.78); background: #28231d; }
 .project-card-name-input:focus-visible { outline: none; }
