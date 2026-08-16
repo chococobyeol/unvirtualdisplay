@@ -19,6 +19,7 @@ import type {
 import { createDefaultDisplayTransform, DISPLAY_CASE_SELECTION_ID } from '../../../shared/types'
 import { cameraSettingsEqual } from '../../../shared/camera'
 import { findOpenImportPosition, isPlacementBelowSafetyFloor } from './itemPlacement'
+import { pickSceneSelection } from './sceneSelection'
 
 interface SceneCallbacks {
   onSelect: (id: string | null) => void
@@ -1479,18 +1480,10 @@ export class SceneRuntime {
     this.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
     this.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
     this.raycaster.setFromCamera(this.pointer, this.camera)
-    const intersections = this.raycaster.intersectObjects([
-      ...[...this.items.values()].map((runtime) => runtime.root),
-      ...(this.caseLayer.visible ? [this.caseLayer] : [])
-    ], true)
-    const hit = intersections[0]?.object
-    let current: THREE.Object3D | null = hit ?? null
-    while (current && !current.userData.itemId && current !== this.caseLayer) current = current.parent
-    const id = typeof current?.userData.itemId === 'string'
-      ? current.userData.itemId
-      : current === this.caseLayer
-        ? DISPLAY_CASE_SELECTION_ID
-        : null
+    const itemRoots = [...this.items.values()]
+      .filter((runtime) => runtime.snapshot.visible !== false)
+      .map((runtime) => runtime.root)
+    const id = pickSceneSelection(this.raycaster, itemRoots, this.caseLayer.visible ? this.caseLayer : null)
     this.callbacks.onSelect(id)
   }
 
