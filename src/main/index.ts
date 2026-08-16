@@ -24,6 +24,7 @@ protocol.registerSchemesAsPrivileged([
 
 let editorWindow: BrowserWindow | null = null
 let displayWindow: BrowserWindow | null = null
+let displayWindowCreation: Promise<BrowserWindow> | null = null
 let tray: Tray | null = null
 let store: ProjectStore
 let isQuitting = false
@@ -40,7 +41,6 @@ let displayMove: {
   bounds: Electron.Rectangle
 } | null = null
 let hasShownTrayHint = false
-let quitSaveInProgress = false
 let quitSaveComplete = false
 const latestProjectPreviews = new Map<string, DisplayProject>()
 const diagnosticLines: string[] = []
@@ -174,15 +174,16 @@ function hideEditorWindowToTray(showHint = false): void {
   if (showHint) showTrayHint()
 }
 
-function setDisplayWindowVisible(visible: boolean): void {
-  if (!displayWindow || displayWindow.isDestroyed()) return
+async function setDisplayWindowVisible(visible: boolean): Promise<void> {
   displayVisible = visible
   if (visible) {
-    displayWindow.showInactive()
+    const window = await ensureDisplayWindow()
+    if (isQuitting || !displayVisible || window.isDestroyed()) return
+    window.showInactive()
     applyDisplaySettings(store.settings)
   } else {
     setDisplayEditing(false)
-    displayWindow.hide()
+    if (displayWindow && !displayWindow.isDestroyed()) displayWindow.hide()
   }
   publishDisplayVisibility()
 }
@@ -206,7 +207,7 @@ function showDisplayContextMenu(): void {
   const labels = currentTrayLabels()
   Menu.buildFromTemplate([
     { label: labels.openEditor, click: () => { void createEditorWindow() } },
-    { label: labels.hideWidget, click: () => setDisplayWindowVisible(false) },
+    { label: labels.hideWidget, click: () => { void setDisplayWindowVisible(false) } },
     {
       label: labels.clickThrough,
       type: 'checkbox',
@@ -219,9 +220,24 @@ function showDisplayContextMenu(): void {
   ]).popup({ window: displayWindow })
 }
 
+function finishAppQuit(): void {
+  quitSaveComplete = true
+  latestProjectPreviews.clear()
+  setImmediate(() => app.quit())
+}
+
 function requestAppQuit(): void {
+  if (isQuitting) return
   isQuitting = true
-  app.quit()
+  if (quitSaveComplete || latestProjectPreviews.size === 0) {
+    finishAppQuit()
+    return
+  }
+
+  const previews = [...latestProjectPreviews.values()].map((project) => structuredClone(project))
+  void Promise.all(previews.map((project) => store.saveProject(project)))
+    .catch((error) => addDiagnostic(`Final project save failed: ${error instanceof Error ? error.message : String(error)}`))
+    .finally(finishAppQuit)
 }
 
 async function createEditorWindow(): Promise<BrowserWindow> {
@@ -272,10 +288,23 @@ async function createEditorWindow(): Promise<BrowserWindow> {
   return editorWindow
 }
 
+async function ensureDisplayWindow(): Promise<BrowserWindow> {
+  if (displayWindow && !displayWindow.isDestroyed()) return displayWindowCreation ?? displayWindow
+  if (displayWindowCreation) return displayWindowCreation
+
+  const creation = createDisplayWindow()
+  displayWindowCreation = creation
+  try {
+    return await creation
+  } finally {
+    if (displayWindowCreation === creation) displayWindowCreation = null
+  }
+}
+
 async function createDisplayWindow(): Promise<BrowserWindow> {
   const settings = store.settings
   const bounds = settings.displayBounds ?? { width: 760, height: 560 }
-  displayWindow = new BrowserWindow({
+  const window = new BrowserWindow({
     title: 'Unvirtual Display',
     ...bounds,
     minWidth: 320,
@@ -290,23 +319,29 @@ async function createDisplayWindow(): Promise<BrowserWindow> {
     show: false,
     webPreferences: commonWebPreferences()
   })
+  displayWindow = window
 
-  displayWindow.setIgnoreMouseEvents(settings.clickThrough, { forward: true })
-  attachDiagnostics(displayWindow, 'display')
-  displayWindow.once('ready-to-show', () => {
-    displayWindow?.showInactive()
+  window.setIgnoreMouseEvents(settings.clickThrough, { forward: true })
+  attachDiagnostics(window, 'display')
+  window.once('ready-to-show', () => {
+    if (displayVisible && !isQuitting && !window.isDestroyed()) window.showInactive()
     publishDisplayVisibility()
   })
-  displayWindow.on('show', publishDisplayVisibility)
-  displayWindow.on('hide', publishDisplayVisibility)
-  displayWindow.on('move', queueDisplayBoundsSave)
-  displayWindow.on('resize', queueDisplayBoundsSave)
-  displayWindow.on('closed', () => {
-    displayWindow = null
-    if (!isQuitting) app.quit()
+  window.on('show', publishDisplayVisibility)
+  window.on('hide', publishDisplayVisibility)
+  window.on('move', queueDisplayBoundsSave)
+  window.on('resize', queueDisplayBoundsSave)
+  window.on('closed', () => {
+    if (displayWindow === window) {
+      displayWindow = null
+      displayEditing = false
+      displayResize = null
+      displayMove = null
+    }
+    if (!isQuitting) requestAppQuit()
   })
-  await loadRenderer(displayWindow, 'display')
-  return displayWindow
+  await loadRenderer(window, 'display')
+  return window
 }
 
 function queueDisplayBoundsSave(): void {
@@ -525,11 +560,12 @@ function registerIpc(): void {
     await writeFile(result.filePath, `${header.concat(diagnosticLines).join('\n')}\n`, 'utf8')
     return true
   })
-  ipcMain.handle('display:set-editing', (_event, editing: boolean) => {
+  ipcMain.handle('display:set-editing', async (_event, editing: boolean) => {
+    if (editing) await setDisplayWindowVisible(true)
     setDisplayEditing(editing)
   })
-  ipcMain.handle('display:set-visible', (_event, visible: boolean) => {
-    setDisplayWindowVisible(visible)
+  ipcMain.handle('display:set-visible', async (_event, visible: boolean) => {
+    await setDisplayWindowVisible(visible)
     return displayVisible
   })
   ipcMain.on('display:show-context-menu', (event) => {
@@ -602,7 +638,7 @@ function refreshTrayMenu(): void {
     },
     {
       label: widgetVisible ? labels.hideWidget : labels.showWidget,
-      click: () => setDisplayWindowVisible(!widgetVisible)
+      click: () => { void setDisplayWindowVisible(!widgetVisible) }
     },
     {
       label: labels.clickThrough,
@@ -613,8 +649,7 @@ function refreshTrayMenu(): void {
     {
       label: labels.adjustWidget,
       click: () => {
-        setDisplayWindowVisible(true)
-        setDisplayEditing(true)
+        void setDisplayWindowVisible(true).then(() => setDisplayEditing(true))
       }
     },
     { type: 'separator' },
@@ -634,9 +669,11 @@ function createTray(): void {
 }
 
 app.on('second-instance', () => {
-  if (!app.isReady()) return
-  displayWindow?.showInactive()
-  void createEditorWindow()
+  if (!app.isReady() || isQuitting) return
+  void Promise.all([
+    createEditorWindow(),
+    displayVisible ? setDisplayWindowVisible(true) : Promise.resolve()
+  ])
 })
 
 app.whenReady().then(async () => {
@@ -663,26 +700,25 @@ app.whenReady().then(async () => {
   })
 
   registerIpc()
-  await Promise.all([createDisplayWindow(), createEditorWindow()])
+  await Promise.all([ensureDisplayWindow(), createEditorWindow()])
   createTray()
 })
 
-app.on('activate', () => { void createEditorWindow() })
+app.on('activate', () => {
+  if (isQuitting) return
+  void Promise.all([
+    createEditorWindow(),
+    displayVisible ? setDisplayWindowVisible(true) : Promise.resolve()
+  ])
+})
 app.on('before-quit', (event) => {
-  isQuitting = true
-  if (quitSaveComplete || latestProjectPreviews.size === 0) return
+  if (quitSaveComplete || latestProjectPreviews.size === 0) {
+    isQuitting = true
+    return
+  }
   event.preventDefault()
-  if (quitSaveInProgress) return
-  quitSaveInProgress = true
-  const previews = [...latestProjectPreviews.values()].map((project) => structuredClone(project))
-  void Promise.all(previews.map((project) => store.saveProject(project)))
-    .catch((error) => addDiagnostic(`Final project save failed: ${error instanceof Error ? error.message : String(error)}`))
-    .finally(() => {
-      quitSaveComplete = true
-      latestProjectPreviews.clear()
-      app.quit()
-    })
+  requestAppQuit()
 })
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
+  if (process.platform !== 'darwin' && !isQuitting) requestAppQuit()
 })
