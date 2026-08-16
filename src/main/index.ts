@@ -234,6 +234,11 @@ function registerIpc(): void {
     broadcast('project:changed', result)
     return result
   })
+  ipcMain.handle('project:reorder', async (_event, projectIds: string[]) => {
+    const result = await store.reorderProjects(projectIds)
+    broadcast('project:changed', result)
+    return result
+  })
   ipcMain.handle('project:activate', async (_event, projectId: string) => {
     const result = await store.activateProject(projectId)
     broadcast('project:changed', result)
@@ -249,6 +254,12 @@ function registerIpc(): void {
   ipcMain.handle('project:reset', async (_event, projectId: string, scope: ProjectResetScope) => {
     latestProjectPreviews.delete(projectId)
     const result = await store.resetProject(projectId, scope)
+    broadcast('project:changed', result)
+    return result
+  })
+  ipcMain.handle('data:reset', async () => {
+    latestProjectPreviews.clear()
+    const result = await store.resetData()
     broadcast('project:changed', result)
     return result
   })

@@ -34,11 +34,13 @@ interface AppState {
   updateItemTransform: (id: string, transform: TransformState, remember?: boolean) => void
   importAssets: (files?: File[]) => Promise<void>
   createProject: () => Promise<void>
-  duplicateProject: () => Promise<void>
-  deleteProject: () => Promise<void>
+  duplicateProject: (projectId?: string) => Promise<void>
+  deleteProject: (projectId?: string) => Promise<void>
+  reorderProjects: (projectIds: string[]) => Promise<void>
   activateProject: (id: string) => Promise<void>
-  clearProject: () => Promise<void>
+  clearProject: (projectId?: string) => Promise<void>
   resetProject: () => Promise<void>
+  resetData: () => Promise<void>
   backupProject: () => Promise<void>
   restoreProject: () => Promise<void>
   updateSettings: (patch: Partial<AppSettings>) => Promise<void>
@@ -286,27 +288,32 @@ export const useAppStore = create<AppState>((set, get) => ({
     await flushPendingSave(set, get)
     applyEvent(set, get, await window.unvirtual.createProject())
   },
-  duplicateProject: async () => {
+  duplicateProject: async (projectId) => {
     await flushPendingSave(set, get)
-    const project = get().project
-    if (project) applyEvent(set, get, await window.unvirtual.duplicateProject(project.id))
+    const targetId = projectId ?? get().project?.id
+    if (targetId) applyEvent(set, get, await window.unvirtual.duplicateProject(targetId))
   },
-  deleteProject: async () => {
+  deleteProject: async (projectId) => {
     await flushPendingSave(set, get)
-    const project = get().project
-    if (project) applyEvent(set, get, await window.unvirtual.deleteProject(project.id))
+    const targetId = projectId ?? get().project?.id
+    if (targetId) applyEvent(set, get, await window.unvirtual.deleteProject(targetId))
+  },
+  reorderProjects: async (projectIds) => {
+    await flushPendingSave(set, get)
+    applyEvent(set, get, await window.unvirtual.reorderProjects(projectIds))
   },
   activateProject: async (id) => {
     await flushPendingSave(set, get)
     set({ selectedItemId: null, history: [], future: [] })
     applyEvent(set, get, await window.unvirtual.activateProject(id))
   },
-  clearProject: async () => {
+  clearProject: async (projectId) => {
     await flushPendingSave(set, get)
     const project = get().project
-    if (!project) return
-    set({ selectedItemId: null, history: [], future: [] })
-    applyEvent(set, get, await window.unvirtual.resetProject(project.id, 'items' satisfies ProjectResetScope))
+    const targetId = projectId ?? project?.id
+    if (!targetId) return
+    if (project?.id === targetId) set({ selectedItemId: null, history: [], future: [] })
+    applyEvent(set, get, await window.unvirtual.resetProject(targetId, 'items' satisfies ProjectResetScope))
   },
   resetProject: async () => {
     await flushPendingSave(set, get)
@@ -314,6 +321,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!project) return
     set({ selectedItemId: null, history: [], future: [] })
     applyEvent(set, get, await window.unvirtual.resetProject(project.id, 'all' satisfies ProjectResetScope))
+  },
+  resetData: async () => {
+    await flushPendingSave(set, get)
+    set({ selectedItemId: null, history: [], future: [] })
+    applyEvent(set, get, await window.unvirtual.resetData())
   },
   backupProject: async () => {
     await flushPendingSave(set, get)

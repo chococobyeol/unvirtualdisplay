@@ -1,22 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { PointerEvent as ReactPointerEvent } from 'react'
+import type { DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent } from 'react'
 import {
   Box,
   Camera,
+  ChevronDown,
   Copy,
+  Ellipsis,
   Eraser,
   Eye,
   EyeOff,
   FileInput,
   FileOutput,
-  FilePlus,
   Image as ImageIcon,
+  Pencil,
   Plus,
   Redo2,
   RotateCcw,
+  Settings,
   Trash2,
   Undo2,
+  X,
   type LucideIcon
 } from 'lucide-react'
 import type {
@@ -35,6 +39,7 @@ import type {
   Vec3
 } from '../../../shared/types'
 import { createDefaultCameraSettings, DISPLAY_CASE_SELECTION_ID } from '../../../shared/types'
+import { reorderById, type ReorderPlacement } from '../reorder'
 import { useAppStore } from '../store'
 import { SceneView, type SceneViewHandle } from './SceneView'
 
@@ -52,19 +57,42 @@ const ICONS = {
   trash: Trash2,
   eye: Eye,
   eyeOff: EyeOff,
-  importItem: FilePlus,
   undo: Undo2,
   redo: Redo2,
   backup: FileOutput,
   restore: FileInput,
   camera: Camera,
   clear: Eraser,
-  reset: RotateCcw
+  reset: RotateCcw,
+  more: Ellipsis,
+  settings: Settings,
+  close: X,
+  rename: Pencil
 } satisfies Record<string, LucideIcon>
 
 function Icon({ name }: { name: keyof typeof ICONS }): React.JSX.Element {
   const Glyph = ICONS[name]
   return <Glyph aria-hidden="true" />
+}
+
+function autoScrollList(list: HTMLElement, clientY: number): void {
+  const bounds = list.getBoundingClientRect()
+  const edgeSize = Math.min(30, bounds.height / 4)
+  if (clientY < bounds.top + edgeSize) list.scrollTop -= 12
+  else if (clientY > bounds.bottom - edgeSize) list.scrollTop += 12
+}
+
+function isFileDrag(event: ReactDragEvent<HTMLElement>): boolean {
+  return Array.from(event.dataTransfer.types).includes('Files')
+}
+
+type PointerReorderState = {
+  kind: 'project' | 'item'
+  id: string
+  pointerId: number
+  startX: number
+  startY: number
+  dragging: boolean
 }
 
 function DisplayCaseGlyph(): React.JSX.Element {
@@ -98,6 +126,90 @@ function Toggle({ checked, onChange, label, hint }: {
       <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
       <i aria-hidden="true" />
     </label>
+  )
+}
+
+function moveMenuFocus(event: React.KeyboardEvent<HTMLDivElement>): void {
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+  const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('.menu-item:not(:disabled)'))
+  if (!items.length) return
+  event.preventDefault()
+  const current = items.indexOf(document.activeElement as HTMLButtonElement)
+  const next = event.key === 'Home'
+    ? 0
+    : event.key === 'End'
+      ? items.length - 1
+      : event.key === 'ArrowDown'
+        ? (current + 1 + items.length) % items.length
+        : (current - 1 + items.length) % items.length
+  items[next]?.focus()
+}
+
+function DisplayFileMenu({ onSaveCapture }: { onSaveCapture: () => void }): React.JSX.Element {
+  const { t } = useTranslation()
+  const backup = useAppStore((state) => state.backupProject)
+  const restore = useAppStore((state) => state.restoreProject)
+  const [open, setOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const menuPopoverRef = useRef<HTMLDivElement>(null)
+  const menuButtonRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const dismiss = (event: PointerEvent): void => {
+      if (!menuRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    window.addEventListener('pointerdown', dismiss)
+    const focusFrame = window.requestAnimationFrame(() => menuPopoverRef.current?.querySelector<HTMLButtonElement>('.menu-item:not(:disabled)')?.focus())
+    return () => {
+      window.cancelAnimationFrame(focusFrame)
+      window.removeEventListener('pointerdown', dismiss)
+    }
+  }, [open])
+
+  return (
+    <div className="toolbar-file-menu" ref={menuRef}>
+      <button
+        ref={menuButtonRef}
+        type="button"
+        className={`toolbar-menu-button${open ? ' active' : ''}`}
+        title={t('fileMenu')}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span>{t('fileMenu')}</span><ChevronDown aria-hidden="true" />
+      </button>
+      {open && <div
+        className="menu-popover toolbar-menu-popover"
+        ref={menuPopoverRef}
+        role="menu"
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            event.preventDefault()
+            event.stopPropagation()
+            setOpen(false)
+            window.requestAnimationFrame(() => menuButtonRef.current?.focus())
+            return
+          }
+          moveMenuFocus(event)
+        }}
+      >
+        <button type="button" className="menu-item" role="menuitem" onClick={() => {
+          setOpen(false)
+          void restore()
+        }}><Icon name="restore" /><span>{t('importDisplayArchive')}</span></button>
+        <button type="button" className="menu-item" role="menuitem" onClick={() => {
+          setOpen(false)
+          void backup()
+        }}><Icon name="backup" /><span>{t('exportDisplayArchive')}</span></button>
+        <div className="menu-separator" role="separator" />
+        <button type="button" className="menu-item" role="menuitem" onClick={() => {
+          setOpen(false)
+          onSaveCapture()
+        }}><Icon name="camera" /><span>{t('capture')}</span></button>
+      </div>}
+    </div>
   )
 }
 
@@ -151,7 +263,10 @@ function LightDirectionControl({
       if (!controlRef.current?.contains(event.target as Node)) setOpen(false)
     }
     const closeFromKeyboard = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setOpen(false)
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      setOpen(false)
     }
     window.addEventListener('pointerdown', closeFromOutside)
     window.addEventListener('keydown', closeFromKeyboard)
@@ -379,23 +494,79 @@ function VectorFields({ label, value, onChange, degrees = false }: {
   )
 }
 
-function ProjectRail({ project, projects }: { project: DisplayProject; projects: ReturnType<typeof useAppStore.getState>['projects'] }): React.JSX.Element {
+function ProjectRail({ project, projects, onInspect }: {
+  project: DisplayProject
+  projects: ReturnType<typeof useAppStore.getState>['projects']
+  onInspect: () => void
+}): React.JSX.Element {
   const { t } = useTranslation()
   const activate = useAppStore((state) => state.activateProject)
   const create = useAppStore((state) => state.createProject)
   const duplicate = useAppStore((state) => state.duplicateProject)
   const remove = useAppStore((state) => state.deleteProject)
+  const reorderProjects = useAppStore((state) => state.reorderProjects)
   const clear = useAppStore((state) => state.clearProject)
-  const reset = useAppStore((state) => state.resetProject)
-  const backup = useAppStore((state) => state.backupProject)
-  const restore = useAppStore((state) => state.restoreProject)
+  const importAssets = useAppStore((state) => state.importAssets)
   const mutate = useAppStore((state) => state.mutateProject)
   const selectedId = useAppStore((state) => state.selectedItemId)
   const select = useAppStore((state) => state.setSelectedItem)
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null)
   const [projectNameDraft, setProjectNameDraft] = useState('')
+  const [projectMenu, setProjectMenu] = useState<{ projectId: string; left: number; top: number } | null>(null)
+  const [draggingProjectId, setDraggingProjectId] = useState<string | null>(null)
+  const [projectDrop, setProjectDrop] = useState<{ targetId: string; placement: ReorderPlacement } | null>(null)
+  const [draggingItemId, setDraggingItemId] = useState<string | null>(null)
+  const [itemDrop, setItemDrop] = useState<{ targetId: string; placement: ReorderPlacement } | null>(null)
   const cancelProjectRename = useRef(false)
+  const suppressProjectClick = useRef(false)
+  const suppressItemClick = useRef(false)
+  const projectDropRef = useRef<{ targetId: string; placement: ReorderPlacement } | null>(null)
+  const itemDropRef = useRef<{ targetId: string; placement: ReorderPlacement } | null>(null)
+  const pointerReorder = useRef<PointerReorderState | null>(null)
+  const projectMenuRef = useRef<HTMLDivElement>(null)
+  const projectMenuAnchorRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    if (!projectMenu) return
+    const dismiss = (event: PointerEvent): void => {
+      const target = event.target
+      if (projectMenuRef.current?.contains(target as Node)) return
+      if (target instanceof Element && target.closest('.project-menu-button')) return
+      setProjectMenu(null)
+    }
+    const dismissFromViewportChange = (): void => setProjectMenu(null)
+    window.addEventListener('pointerdown', dismiss)
+    window.addEventListener('resize', dismissFromViewportChange)
+    document.addEventListener('scroll', dismissFromViewportChange, true)
+    const focusFrame = window.requestAnimationFrame(() => projectMenuRef.current?.querySelector<HTMLButtonElement>('.menu-item:not(:disabled)')?.focus())
+    return () => {
+      window.cancelAnimationFrame(focusFrame)
+      window.removeEventListener('pointerdown', dismiss)
+      window.removeEventListener('resize', dismissFromViewportChange)
+      document.removeEventListener('scroll', dismissFromViewportChange, true)
+    }
+  }, [projectMenu])
+
+  useEffect(() => () => document.body.classList.remove('list-reordering'), [])
+
+  const toggleProjectMenu = (summary: ProjectSummary, anchor: HTMLButtonElement): void => {
+    if (projectMenu?.projectId === summary.id) {
+      setProjectMenu(null)
+      return
+    }
+    projectMenuAnchorRef.current = anchor
+    const bounds = anchor.getBoundingClientRect()
+    const menuWidth = 170
+    const menuHeight = 150
+    const left = Math.max(8, Math.min(window.innerWidth - menuWidth - 8, bounds.right - menuWidth))
+    const top = bounds.bottom + menuHeight <= window.innerHeight - 8
+      ? bounds.bottom + 4
+      : Math.max(8, bounds.top - menuHeight - 4)
+    setProjectMenu({ projectId: summary.id, left, top })
+  }
+
   const beginProjectRename = (summary: ProjectSummary): void => {
+    setProjectMenu(null)
     cancelProjectRename.current = false
     setProjectNameDraft(summary.name)
     setRenamingProjectId(summary.id)
@@ -422,6 +593,128 @@ function ProjectRail({ project, projects }: { project: DisplayProject; projects:
     mutate((draft) => { draft.items = draft.items.filter((item) => item.id !== id) })
     if (selectedId === id) select(null)
   }
+  const finishProjectDrag = (): void => {
+    setDraggingProjectId(null)
+    setProjectDrop(null)
+    projectDropRef.current = null
+    suppressProjectClick.current = true
+    window.setTimeout(() => { suppressProjectClick.current = false }, 0)
+  }
+  const finishItemDrag = (): void => {
+    setDraggingItemId(null)
+    setItemDrop(null)
+    itemDropRef.current = null
+    suppressItemClick.current = true
+    window.setTimeout(() => { suppressItemClick.current = false }, 0)
+  }
+  const reorderProjectRows = (sourceId: string, targetId: string, placement: ReorderPlacement): void => {
+    const next = reorderById(projects, sourceId, targetId, placement)
+    if (next.some((summary, index) => summary.id !== projects[index]?.id)) {
+      void reorderProjects(next.map((summary) => summary.id))
+    }
+  }
+  const reorderItemRows = (sourceId: string, targetId: string, placement: ReorderPlacement): void => {
+    mutate((draft) => {
+      draft.items = reorderById(draft.items, sourceId, targetId, placement)
+    })
+  }
+  const beginPointerReorder = (event: ReactPointerEvent<HTMLButtonElement>, kind: PointerReorderState['kind'], id: string): void => {
+    if (event.button !== 0) return
+    pointerReorder.current = {
+      kind,
+      id,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      dragging: false
+    }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+  const updatePointerReorder = (event: ReactPointerEvent<HTMLButtonElement>): void => {
+    const drag = pointerReorder.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    if (!drag.dragging) {
+      if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6) return
+      drag.dragging = true
+      document.body.classList.add('list-reordering')
+      if (drag.kind === 'project') {
+        setProjectMenu(null)
+        setDraggingProjectId(drag.id)
+      } else {
+        setDraggingItemId(drag.id)
+      }
+    }
+
+    event.preventDefault()
+    const selector = drag.kind === 'project' ? '[data-reorder-project-id]' : '[data-reorder-item-id]'
+    const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>(selector)
+    const targetId = drag.kind === 'project' ? target?.dataset.reorderProjectId : target?.dataset.reorderItemId
+    const list = event.currentTarget.closest<HTMLElement>(drag.kind === 'project' ? '.project-list' : '.item-list')
+    if (list) autoScrollList(list, event.clientY)
+    if (!target || !targetId || targetId === drag.id) {
+      if (drag.kind === 'project') {
+        projectDropRef.current = null
+        setProjectDrop(null)
+      } else {
+        itemDropRef.current = null
+        setItemDrop(null)
+      }
+      return
+    }
+
+    const bounds = target.getBoundingClientRect()
+    const nextDrop = {
+      targetId,
+      placement: event.clientY < bounds.top + bounds.height / 2 ? 'before' : 'after'
+    } satisfies { targetId: string; placement: ReorderPlacement }
+    if (drag.kind === 'project') {
+      projectDropRef.current = nextDrop
+      setProjectDrop(nextDrop)
+    } else {
+      itemDropRef.current = nextDrop
+      setItemDrop(nextDrop)
+    }
+  }
+  const endPointerReorder = (event: ReactPointerEvent<HTMLButtonElement>): void => {
+    const drag = pointerReorder.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    pointerReorder.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+    document.body.classList.remove('list-reordering')
+    if (!drag.dragging) return
+    event.preventDefault()
+    if (drag.kind === 'project') {
+      const drop = projectDropRef.current
+      if (drop) reorderProjectRows(drag.id, drop.targetId, drop.placement)
+      finishProjectDrag()
+    } else {
+      const drop = itemDropRef.current
+      if (drop) reorderItemRows(drag.id, drop.targetId, drop.placement)
+      finishItemDrag()
+    }
+  }
+  const cancelPointerReorder = (event: ReactPointerEvent<HTMLButtonElement>): void => {
+    const drag = pointerReorder.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    pointerReorder.current = null
+    document.body.classList.remove('list-reordering')
+    if (drag.kind === 'project') finishProjectDrag()
+    else finishItemDrag()
+  }
+  const projectCardClass = (projectId: string): string => [
+    'project-card',
+    projectId === project.id ? 'active' : '',
+    projectId === draggingProjectId ? 'dragging' : '',
+    projectDrop?.targetId === projectId ? `drop-${projectDrop.placement}` : ''
+  ].filter(Boolean).join(' ')
+  const itemRowClass = (item: DisplayItem): string => [
+    'item-row',
+    item.id === selectedId ? 'active' : '',
+    item.visible === false ? 'hidden' : '',
+    item.id === draggingItemId ? 'dragging' : '',
+    itemDrop?.targetId === item.id ? `drop-${itemDrop.placement}` : ''
+  ].filter(Boolean).join(' ')
+  const menuProject = projectMenu ? projects.find((summary) => summary.id === projectMenu.projectId) ?? null : null
 
   return (
     <aside className="project-rail panel-surface">
@@ -459,39 +752,100 @@ function ProjectRail({ project, projects }: { project: DisplayProject; projects:
                 <small>{summary.itemCount} {t('items').toLowerCase()}</small>
               </span>
             </div>
-            : <button
+            : <div
               key={summary.id}
-              className={summary.id === project.id ? 'project-card active' : 'project-card'}
-              title={t('renameDisplayHint')}
-              onClick={(event) => {
-                if (event.detail === 1 && summary.id !== project.id) void activate(summary.id)
-              }}
-              onDoubleClick={() => beginProjectRename(summary)}
+              className={projectCardClass(summary.id)}
+              data-reorder-project-id={summary.id}
             >
-              <span className="project-thumb"><DisplayCaseGlyph /></span>
-              <span><b>{summary.name}</b><small>{summary.itemCount} {t('items').toLowerCase()}</small></span>
-            </button>)}
+              <button
+                type="button"
+                className="project-card-main reorderable-row-main"
+                title={`${t('dragToReorder')} · ${t('renameDisplayHint')}`}
+                aria-current={summary.id === project.id ? 'true' : undefined}
+                onPointerDown={(event) => beginPointerReorder(event, 'project', summary.id)}
+                onPointerMove={updatePointerReorder}
+                onPointerUp={endPointerReorder}
+                onPointerCancel={cancelPointerReorder}
+                onClick={(event) => {
+                  if (suppressProjectClick.current) {
+                    event.preventDefault()
+                    return
+                  }
+                  if (event.detail !== 1) return
+                  onInspect()
+                  if (summary.id !== project.id) void activate(summary.id)
+                }}
+                onDoubleClick={() => beginProjectRename(summary)}
+              >
+                <span className="project-thumb"><DisplayCaseGlyph /></span>
+                <span><b>{summary.name}</b><small>{summary.itemCount} {t('items').toLowerCase()}</small></span>
+              </button>
+              <button
+                type="button"
+                className={`project-menu-button${projectMenu?.projectId === summary.id ? ' open' : ''}`}
+                title={t('displayActions', { name: summary.name })}
+                aria-label={t('displayActions', { name: summary.name })}
+                aria-haspopup="menu"
+                aria-expanded={projectMenu?.projectId === summary.id}
+                onDoubleClick={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  toggleProjectMenu(summary, event.currentTarget)
+                }}
+              ><Icon name="more" /></button>
+            </div>)}
         </div>
+        {projectMenu && menuProject && <div
+          className="menu-popover project-menu-popover"
+          ref={projectMenuRef}
+          role="menu"
+          style={{ left: projectMenu.left, top: projectMenu.top }}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.preventDefault()
+              event.stopPropagation()
+              setProjectMenu(null)
+              window.requestAnimationFrame(() => projectMenuAnchorRef.current?.focus())
+              return
+            }
+            moveMenuFocus(event)
+          }}
+        >
+          <button type="button" className="menu-item" role="menuitem" onClick={() => beginProjectRename(menuProject)}>
+            <Icon name="rename" /><span>{t('rename')}</span>
+          </button>
+          <button type="button" className="menu-item" role="menuitem" onClick={() => {
+            setProjectMenu(null)
+            void duplicate(menuProject.id)
+          }}><Icon name="copy" /><span>{t('duplicate')}</span></button>
+          <div className="menu-separator" role="separator" />
+          <button type="button" className="menu-item danger" role="menuitem" disabled={menuProject.itemCount === 0} onClick={() => {
+            setProjectMenu(null)
+            if (window.confirm(t('clearConfirm'))) void clear(menuProject.id)
+          }}><Icon name="clear" /><span>{t('clearDisplay')}</span></button>
+          <button type="button" className="menu-item danger" role="menuitem" disabled={projects.length <= 1} onClick={() => {
+            setProjectMenu(null)
+            if (window.confirm(t('deleteConfirm'))) void remove(menuProject.id).catch(() => window.alert(t('lastProject')))
+          }}><Icon name="trash" /><span>{t('delete')}</span></button>
+        </div>}
       </section>
-      <div className="rail-actions">
-        <button className="quiet-button" title={t('duplicate')} onClick={() => void duplicate()}><Icon name="copy" /><span>{t('duplicate')}</span></button>
-        <button className="quiet-button danger" title={t('delete')} disabled={projects.length <= 1} onClick={() => {
-          if (window.confirm(t('deleteConfirm'))) void remove().catch(() => window.alert(t('lastProject')))
-        }}><Icon name="trash" /><span>{t('delete')}</span></button>
-        <button className="quiet-button" title={t('backup')} onClick={() => void backup()}><Icon name="backup" /><span>{t('backup')}</span></button>
-        <button className="quiet-button" title={t('restore')} onClick={() => void restore()}><Icon name="restore" /><span>{t('restore')}</span></button>
-        <button className="quiet-button danger" title={t('clearDisplay')} disabled={project.items.length === 0} onClick={() => {
-          if (window.confirm(t('clearConfirm'))) void clear()
-        }}><Icon name="clear" /><span>{t('clearDisplay')}</span></button>
-        <button className="quiet-button danger" title={t('resetDisplay')} onClick={() => {
-          if (window.confirm(t('resetConfirm'))) void reset()
-        }}><Icon name="reset" /><span>{t('resetDisplay')}</span></button>
-      </div>
       <section className="panel-section item-list-section">
-        <div className="section-heading"><h2>{t('items')}</h2><span className="count-badge">{project.items.length}</span></div>
+        <div className="section-heading">
+          <span className="section-heading-title"><h2>{t('items')}</h2><span className="count-badge">{project.items.length}</span></span>
+          <button
+            type="button"
+            className="icon-button"
+            title={t('import')}
+            aria-label={t('import')}
+            onClick={() => void importAssets().catch(() => window.alert(t('importFailed')))}
+          ><Icon name="plus" /></button>
+        </div>
         <div className="item-list">
           <div className={`item-row case-row${selectedId === DISPLAY_CASE_SELECTION_ID ? ' active' : ''}${project.caseVisible === false ? ' hidden' : ''}`}>
-            <button className="item-row-main" onClick={() => select(DISPLAY_CASE_SELECTION_ID)}>
+            <button className="item-row-main" onClick={() => {
+              onInspect()
+              select(DISPLAY_CASE_SELECTION_ID)
+            }}>
               <span className="case-dot"><DisplayCaseGlyph /></span>
               <span><b>{t('caseObject')}</b><small>{t(project.casePreset)}</small></span>
             </button>
@@ -505,10 +859,27 @@ function ProjectRail({ project, projects }: { project: DisplayProject; projects:
               ><Icon name={project.caseVisible === false ? 'eyeOff' : 'eye'} /></button>
             </span>
           </div>
-          {project.items.length === 0 && <p className="muted-copy">{t('emptyItems')}</p>}
           {project.items.map((item) => (
-            <div key={item.id} className={`item-row${item.id === selectedId ? ' active' : ''}${item.visible === false ? ' hidden' : ''}`}>
-              <button className="item-row-main" onClick={() => select(item.id)}>
+            <div
+              key={item.id}
+              className={itemRowClass(item)}
+              data-reorder-item-id={item.id}
+            >
+              <button
+                className="item-row-main reorderable-row-main"
+                title={t('dragToReorder')}
+                onPointerDown={(event) => beginPointerReorder(event, 'item', item.id)}
+                onPointerMove={updatePointerReorder}
+                onPointerUp={endPointerReorder}
+                onPointerCancel={cancelPointerReorder}
+                onClick={(event) => {
+                  if (suppressItemClick.current) {
+                    event.preventDefault()
+                    return
+                  }
+                onInspect()
+                select(item.id)
+              }}>
                 <ItemGlyph kind={item.kind} />
                 <span><b>{item.name}</b><small>{item.format.toUpperCase()}</small></span>
               </button>
@@ -592,10 +963,11 @@ function Inspector({ item, project, caseSelected }: { item: DisplayItem | null; 
   )
 }
 
-function SettingsPanel({ settings, project }: { settings: AppSettings; project: DisplayProject }): React.JSX.Element {
+function SettingsPanel({ settings, project, onClose }: { settings: AppSettings; project: DisplayProject; onClose: () => void }): React.JSX.Element {
   const { t } = useTranslation()
   const update = useAppStore((state) => state.updateSettings)
   const mutate = useAppStore((state) => state.mutateProject)
+  const resetData = useAppStore((state) => state.resetData)
   const importBackground = async (): Promise<void> => {
     const asset = await window.unvirtual.importBackground(project.id)
     if (!asset) return
@@ -606,30 +978,51 @@ function SettingsPanel({ settings, project }: { settings: AppSettings; project: 
     })
   }
   return (
-    <section className="settings-block">
-      <h3>{t('settings')}</h3>
-      <label className="select-row"><span>{t('language')}</span><select value={settings.language} onChange={(event) => void update({ language: event.target.value as Language })}>{LANGUAGES.map((language) => <option key={language.value} value={language.value}>{language.label}</option>)}</select></label>
-      <Toggle checked={settings.alwaysOnTop} label={t('alwaysOnTop')} onChange={(alwaysOnTop) => void update({ alwaysOnTop })} />
-      <Toggle checked={settings.clickThrough} label={t('clickThrough')} hint={t('clickThroughHint')} onChange={(clickThrough) => void update({ clickThrough })} />
-      <button className="widget-adjust-button" onClick={() => void window.unvirtual.setDisplayEditing(true)}>{t('adjustWidget')}</button>
-      <h3 className="subsettings-heading">{t('widgetBackground')}</h3>
-      <label className="select-row"><span>{t('backgroundMode')}</span><select value={project.background.mode} onChange={(event) => mutate((draft) => { draft.background.mode = event.target.value as BackgroundMode })}>
-        <option value="transparent">{t('backgroundTransparent')}</option>
-        <option value="solid">{t('backgroundSolid')}</option>
-        <option value="image">{t('backgroundImage')}</option>
-      </select></label>
-      {project.background.mode === 'solid' && <label className="color-row"><span>{t('backgroundColor')}</span><input type="color" value={project.background.color} onChange={(event) => mutate((draft) => { draft.background.color = event.target.value })} /></label>}
-      {project.background.mode === 'image' && <div className="background-image-controls">
-        <button onClick={() => void importBackground()}>{project.background.imageUrl ? t('changeBackground') : t('chooseBackground')}</button>
-        {project.background.imageUrl
-          ? <button className="background-clear" onClick={() => mutate((draft) => { delete draft.background.imageUrl; delete draft.background.relativePath })}>{t('removeBackground')}</button>
-          : <p>{t('backgroundFallback')}</p>}
-        <label className="select-row"><span>{t('backgroundFit')}</span><select value={project.background.fit} onChange={(event) => mutate((draft) => { draft.background.fit = event.target.value as BackgroundFit })}>
-          <option value="cover">{t('cover')}</option><option value="contain">{t('contain')}</option>
-        </select></label>
-      </div>}
-      <label className="select-row"><span>{t('quality')}</span><select value={settings.quality} onChange={(event) => void update({ quality: event.target.value as QualityPreset })}>{(['low', 'balanced', 'high'] as QualityPreset[]).map((quality) => <option key={quality} value={quality}>{t(quality)}</option>)}</select></label>
-      <button className="diagnostics-button" onClick={() => void window.unvirtual.exportDiagnostics()}>{t('diagnostics')}</button>
+    <section className="settings-panel">
+      <header className="settings-panel-header">
+        <span><Icon name="settings" /><h2>{t('settings')}</h2></span>
+        <button type="button" className="icon-button" title={t('closeSettings')} aria-label={t('closeSettings')} onClick={onClose}><Icon name="close" /></button>
+      </header>
+      <div className="settings-panel-body">
+        <section className="settings-section">
+          <h3>{t('settingsGeneral')}</h3>
+          <label className="select-row"><span>{t('language')}</span><select value={settings.language} onChange={(event) => void update({ language: event.target.value as Language })}>{LANGUAGES.map((language) => <option key={language.value} value={language.value}>{language.label}</option>)}</select></label>
+          <label className="select-row"><span>{t('quality')}</span><select value={settings.quality} onChange={(event) => void update({ quality: event.target.value as QualityPreset })}>{(['low', 'balanced', 'high'] as QualityPreset[]).map((quality) => <option key={quality} value={quality}>{t(quality)}</option>)}</select></label>
+        </section>
+        <section className="settings-section">
+          <h3>{t('settingsWidget')}</h3>
+          <Toggle checked={settings.alwaysOnTop} label={t('alwaysOnTop')} onChange={(alwaysOnTop) => void update({ alwaysOnTop })} />
+          <Toggle checked={settings.clickThrough} label={t('clickThrough')} hint={t('clickThroughHint')} onChange={(clickThrough) => void update({ clickThrough })} />
+          <button className="widget-adjust-button" onClick={() => void window.unvirtual.setDisplayEditing(true)}>{t('adjustWidget')}</button>
+          <h4>{t('widgetBackground')}</h4>
+          <label className="select-row"><span>{t('backgroundMode')}</span><select value={project.background.mode} onChange={(event) => mutate((draft) => { draft.background.mode = event.target.value as BackgroundMode })}>
+            <option value="transparent">{t('backgroundTransparent')}</option>
+            <option value="solid">{t('backgroundSolid')}</option>
+            <option value="image">{t('backgroundImage')}</option>
+          </select></label>
+          {project.background.mode === 'solid' && <label className="color-row"><span>{t('backgroundColor')}</span><input type="color" value={project.background.color} onChange={(event) => mutate((draft) => { draft.background.color = event.target.value })} /></label>}
+          {project.background.mode === 'image' && <div className="background-image-controls">
+            <button onClick={() => void importBackground()}>{project.background.imageUrl ? t('changeBackground') : t('chooseBackground')}</button>
+            {project.background.imageUrl
+              ? <button className="background-clear" onClick={() => mutate((draft) => { delete draft.background.imageUrl; delete draft.background.relativePath })}>{t('removeBackground')}</button>
+              : <p>{t('backgroundFallback')}</p>}
+            <label className="select-row"><span>{t('backgroundFit')}</span><select value={project.background.fit} onChange={(event) => mutate((draft) => { draft.background.fit = event.target.value as BackgroundFit })}>
+              <option value="cover">{t('cover')}</option><option value="contain">{t('contain')}</option>
+            </select></label>
+          </div>}
+        </section>
+        <section className="settings-section settings-diagnostics">
+          <h3>{t('settingsDiagnostics')}</h3>
+          <button className="diagnostics-button" onClick={() => void window.unvirtual.exportDiagnostics()}>{t('diagnostics')}</button>
+        </section>
+        <section className="settings-danger-zone">
+          <h3>{t('dataManagement')}</h3>
+          <p>{t('resetDataDescription')}</p>
+          <button type="button" onClick={() => {
+            if (window.confirm(t('resetDataConfirm'))) void resetData().then(onClose)
+          }}><Icon name="reset" /><span>{t('resetData')}</span></button>
+        </section>
+      </div>
     </section>
   )
 }
@@ -653,13 +1046,19 @@ export function EditorApp(): React.JSX.Element | null {
   const redo = useAppStore((state) => state.redo)
   const [draggingFiles, setDraggingFiles] = useState(false)
   const [cameraResetKey, setCameraResetKey] = useState(0)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const sceneViewRef = useRef<SceneViewHandle>(null)
 
   const selectedItem = useMemo(() => project?.items.find((item) => item.id === selectedId) ?? null, [project, selectedId])
   useEffect(() => {
     const handleKey = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') {
+        if (document.querySelector('[role="menu"]')) return
         event.preventDefault()
+        if (settingsOpen) {
+          setSettingsOpen(false)
+          return
+        }
         setSelected(null)
         return
       }
@@ -682,7 +1081,7 @@ export function EditorApp(): React.JSX.Element | null {
     }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
-  }, [mutate, redo, selectedId, setMode, setSelected, undo])
+  }, [mutate, redo, selectedId, setMode, setSelected, settingsOpen, undo])
 
   if (!project || !settings) return null
 
@@ -701,7 +1100,7 @@ export function EditorApp(): React.JSX.Element | null {
 
   return (
     <main className="editor-shell">
-      <ProjectRail project={project} projects={projects} />
+      <ProjectRail project={project} projects={projects} onInspect={() => setSettingsOpen(false)} />
       <section className="workspace">
         <header className="toolbar panel-surface">
           <div className="tool-group segmented">
@@ -711,20 +1110,33 @@ export function EditorApp(): React.JSX.Element | null {
             <button className="icon-button" disabled={!history.length} title={t('undo')} onClick={undo}><Icon name="undo" /></button>
             <button className="icon-button" disabled={!future.length} title={t('redo')} onClick={redo}><Icon name="redo" /></button>
           </div>
+          <DisplayFileMenu onSaveCapture={saveCapture} />
           <div className="case-switcher">
             <span>{t('displayCase')}</span>
             {CASES.map((preset) => <button key={preset} title={t(preset)} className={project.casePreset === preset ? 'active' : ''} onClick={() => changeCase(preset)}>{t(`${preset}Short`)}</button>)}
           </div>
           <span className={`save-status ${saveStatus}`}>{saveStatus === 'saving' ? t('saving') : t('saved')}</span>
           <button className="icon-button capture-button" onClick={saveCapture} title={t('capture')} aria-label={t('capture')}><Icon name="camera" /></button>
-          <button className="import-button" onClick={() => void importAssets().catch(() => window.alert(t('importFailed')))}><Icon name="importItem" />{t('import')}</button>
+          <button
+            type="button"
+            className={`icon-button settings-button${settingsOpen ? ' active' : ''}`}
+            title={t('settings')}
+            aria-label={t('settings')}
+            aria-pressed={settingsOpen}
+            onClick={() => setSettingsOpen((open) => !open)}
+          ><Icon name="settings" /></button>
         </header>
         <div
           className={draggingFiles ? 'scene-stage file-dragging' : 'scene-stage'}
-          onDragEnter={(event) => { event.preventDefault(); setDraggingFiles(true) }}
-          onDragOver={(event) => event.preventDefault()}
+          onDragEnter={(event) => {
+            if (!isFileDrag(event)) return
+            event.preventDefault()
+            setDraggingFiles(true)
+          }}
+          onDragOver={(event) => { if (isFileDrag(event)) event.preventDefault() }}
           onDragLeave={(event) => { if (event.currentTarget === event.target) setDraggingFiles(false) }}
           onDrop={(event) => {
+            if (!isFileDrag(event)) return
             event.preventDefault()
             setDraggingFiles(false)
             void importAssets(Array.from(event.dataTransfer.files)).catch(() => window.alert(t('importFailed')))
@@ -737,7 +1149,10 @@ export function EditorApp(): React.JSX.Element | null {
             variant="editor"
             selectedItemId={selectedId}
             transformMode={transformMode}
-            onSelect={setSelected}
+            onSelect={(id) => {
+              setSettingsOpen(false)
+              setSelected(id)
+            }}
             onTransform={updateTransform}
             onCamera={(camera) => mutate((draft) => { draft.camera = camera }, false)}
             cameraResetKey={cameraResetKey}
@@ -775,8 +1190,9 @@ export function EditorApp(): React.JSX.Element | null {
         </footer>
       </section>
       <aside className="inspector panel-surface">
-        <Inspector item={selectedItem} project={project} caseSelected={selectedId === DISPLAY_CASE_SELECTION_ID} />
-        <SettingsPanel settings={settings} project={project} />
+        {settingsOpen
+          ? <SettingsPanel settings={settings} project={project} onClose={() => setSettingsOpen(false)} />
+          : <Inspector item={selectedItem} project={project} caseSelected={selectedId === DISPLAY_CASE_SELECTION_ID} />}
       </aside>
       {!settings.onboardingComplete && <div className="onboarding-backdrop">
         <section className="onboarding-card">

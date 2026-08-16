@@ -15,6 +15,7 @@ import { createDefaultCameraSettings, createDefaultDisplayTransform, createDefau
 
 interface StoreIndex {
   activeProjectId: string
+  projectOrder: string[]
   settings: AppSettings
 }
 
@@ -131,6 +132,7 @@ export class ProjectStore {
     this.indexPath = join(this.root, 'state.json')
     this.index = {
       activeProjectId: '',
+      projectOrder: [],
       settings: {
         language: defaultLanguage(locale),
         onboardingComplete: false,
@@ -149,6 +151,9 @@ export class ProjectStore {
         const stored = JSON.parse(await readFile(this.indexPath, 'utf8')) as StoreIndex
         this.index = {
           activeProjectId: stored.activeProjectId,
+          projectOrder: Array.isArray(stored.projectOrder)
+            ? stored.projectOrder.filter((projectId): projectId is string => typeof projectId === 'string')
+            : [],
           settings: { ...this.index.settings, ...stored.settings }
         }
       } catch {
@@ -163,6 +168,7 @@ export class ProjectStore {
       this.index.activeProjectId = project.id
     }
 
+    this.index.projectOrder = (await this.listProjects()).map((project) => project.id)
     await this.saveIndex()
   }
 
@@ -191,7 +197,15 @@ export class ProjectStore {
       }
     }
 
-    return projects.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    const order = new Map(this.index.projectOrder.map((projectId, index) => [projectId, index]))
+    return projects.sort((a, b) => {
+      const aIndex = order.get(a.id)
+      const bIndex = order.get(b.id)
+      if (aIndex !== undefined && bIndex !== undefined) return aIndex - bIndex
+      if (aIndex !== undefined) return -1
+      if (bIndex !== undefined) return 1
+      return b.updatedAt.localeCompare(a.updatedAt)
+    })
   }
 
   async loadProject(projectId: string): Promise<DisplayProject> {
@@ -204,6 +218,7 @@ export class ProjectStore {
     await mkdir(this.assetFolder(project.id), { recursive: true })
     await this.writeProject(project)
     this.index.activeProjectId = project.id
+    this.index.projectOrder = [project.id, ...this.index.projectOrder.filter((projectId) => projectId !== project.id)]
     await this.saveIndex()
     return project
   }
@@ -257,6 +272,16 @@ export class ProjectStore {
     })
   }
 
+  async resetData(): Promise<ProjectEvent> {
+    await Promise.all([...this.projectQueues.values()])
+    this.projectQueues.clear()
+    await rm(this.projectsRoot, { recursive: true, force: true })
+    await mkdir(this.projectsRoot, { recursive: true })
+    this.index.projectOrder = []
+    const project = await this.createProject()
+    return this.event(project)
+  }
+
   async activateProject(projectId: string): Promise<ProjectEvent> {
     const project = await this.loadProject(projectId)
     this.index.activeProjectId = projectId
@@ -290,6 +315,9 @@ export class ProjectStore {
     }
     await this.writeProject(copy)
     this.index.activeProjectId = copy.id
+    const sourceIndex = this.index.projectOrder.indexOf(source.id)
+    const insertAt = sourceIndex < 0 ? 0 : sourceIndex + 1
+    this.index.projectOrder.splice(insertAt, 0, copy.id)
     await this.saveIndex()
     return this.event(copy)
   }
@@ -300,10 +328,26 @@ export class ProjectStore {
     if (projects.length <= 1) throw new Error('At least one project must remain.')
 
     await rm(this.projectFolder(projectId), { recursive: true, force: true })
+    this.index.projectOrder = this.index.projectOrder.filter((candidate) => candidate !== projectId)
 
     const remaining = (await this.listProjects())[0]
     if (!remaining) throw new Error('No project remained after deletion.')
     if (this.index.activeProjectId === projectId) this.index.activeProjectId = remaining.id
+    await this.saveIndex()
+    return this.event(await this.getActiveProject())
+  }
+
+  async reorderProjects(projectIds: string[]): Promise<ProjectEvent> {
+    const projects = await this.listProjects()
+    const existingIds = new Set(projects.map((project) => project.id))
+    const seen = new Set<string>()
+    const orderedIds = projectIds.filter((projectId) => {
+      if (!existingIds.has(projectId) || seen.has(projectId)) return false
+      seen.add(projectId)
+      return true
+    })
+    orderedIds.push(...projects.map((project) => project.id).filter((projectId) => !seen.has(projectId)))
+    this.index.projectOrder = orderedIds
     await this.saveIndex()
     return this.event(await this.getActiveProject())
   }
@@ -391,6 +435,7 @@ export class ProjectStore {
 
     await this.writeProject(imported)
     this.index.activeProjectId = imported.id
+    this.index.projectOrder = [imported.id, ...this.index.projectOrder.filter((projectId) => projectId !== imported.id)]
     await this.saveIndex()
     return this.event(imported)
   }

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
+import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
 import { DISPLAY_CASE_SELECTION_ID } from '../../../shared/types'
-import { hitsVisibleTransformHandle, pickSceneSelection } from './sceneSelection'
+import { pickSceneSelection, transformAxisAtPointer } from './sceneSelection'
 
 function centerRay(): THREE.Raycaster {
   const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100)
@@ -91,28 +92,72 @@ describe('pickSceneSelection', () => {
   it('returns no selection when the pointer hits empty space', () => {
     expect(pickSceneSelection(centerRay(), [], null)).toBeNull()
   })
+})
 
-  it('only treats rendered gizmo geometry as a visible handle', () => {
-    const gizmo = new THREE.Group()
-    const visibleArrow = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.2, 0.2))
-    visibleArrow.position.z = 1
-    gizmo.add(visibleArrow)
+describe('transformAxisAtPointer', () => {
+  it('confirms the actual rotation picker used by TransformControls hover', () => {
+    const element = {
+      style: {},
+      addEventListener(): void {},
+      removeEventListener(): void {}
+    } as unknown as HTMLElement
+    const camera = new THREE.PerspectiveCamera(45, 10 / 7, 0.1, 100)
+    camera.position.set(4, 3, 7)
+    camera.lookAt(0, 1, 0)
+    const scene = new THREE.Scene()
+    const object = new THREE.Group()
+    object.position.set(0, 1, 0)
+    scene.add(object)
+    const controls = new TransformControls(camera, element)
+    scene.add(controls.getHelper())
+    controls.attach(object).setMode('rotate')
+    scene.updateMatrixWorld(true)
+    const pointer = new THREE.Vector2(-0.14, -0.35)
 
-    const hiddenDragPlane = new THREE.Mesh(
-      new THREE.PlaneGeometry(100000, 100000),
-      new THREE.MeshBasicMaterial({ visible: false })
-    ) as THREE.Mesh & { isTransformControlsPlane?: boolean }
-    hiddenDragPlane.isTransformControlsPlane = true
-    gizmo.add(hiddenDragPlane)
+    controls.pointerHover({ x: pointer.x, y: pointer.y, button: -1 } as unknown as PointerEvent)
+    const highlightedAxis = controls.axis
 
-    const invisiblePicker = new THREE.Group()
-    invisiblePicker.visible = false
-    invisiblePicker.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 0.2)))
-    gizmo.add(invisiblePicker)
-    gizmo.updateMatrixWorld(true)
+    expect(highlightedAxis).not.toBeNull()
+    expect(transformAxisAtPointer(controls, pointer, 0)).toBe(highlightedAxis)
+    controls.dispose()
+  })
 
-    expect(hitsVisibleTransformHandle(centerRay(), gizmo)).toBe(true)
-    visibleArrow.visible = false
-    expect(hitsVisibleTransformHandle(centerRay(), gizmo)).toBe(false)
+  it('uses the same native axis that was already highlighted', () => {
+    const pointer = new THREE.Vector2(0.2, -0.35)
+    const calls: Array<{ x: number; y: number; button: number }> = []
+    const controls = {
+      axis: 'Y' as string | null,
+      pointerHover(next: PointerEvent | null): void {
+        if (!next) return
+        calls.push({ x: next.x, y: next.y, button: next.button })
+        this.axis = 'Y'
+      }
+    }
+
+    expect(transformAxisAtPointer(controls, pointer, 0)).toBe('Y')
+    expect(calls).toEqual([{ x: 0.2, y: -0.35, button: 0 }])
+  })
+
+  it('refreshes the native picker for a direct press without prior hover', () => {
+    let refreshed = false
+    const controls = {
+      axis: null as string | null,
+      pointerHover(): void {
+        refreshed = true
+        this.axis = 'Y'
+      }
+    }
+
+    expect(transformAxisAtPointer(controls, new THREE.Vector2(), 0)).toBe('Y')
+    expect(refreshed).toBe(true)
+  })
+
+  it('rejects a stale highlighted axis when the pointerdown no longer hits it', () => {
+    const controls = {
+      axis: 'Z' as string | null,
+      pointerHover(): void { this.axis = null }
+    }
+
+    expect(transformAxisAtPointer(controls, new THREE.Vector2(0.8, 0.8), 0)).toBeNull()
   })
 })

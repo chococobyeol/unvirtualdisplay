@@ -78,6 +78,20 @@ describe('ProjectStore', () => {
     expect(deleted.project.id).toBe(original.id)
   })
 
+  it('persists a custom display order across restarts', async () => {
+    const store = await createStore()
+    const first = await store.getActiveProject()
+    const second = await store.createProject('Second')
+    const third = await store.createProject('Third')
+
+    const reordered = await store.reorderProjects([first.id, third.id, second.id])
+    expect(reordered.projects.map((project) => project.id)).toEqual([first.id, third.id, second.id])
+
+    const reopened = new ProjectStore(temporaryRoots[0], 'ko-KR')
+    await reopened.initialize()
+    expect((await reopened.listProjects()).map((project) => project.id)).toEqual([first.id, third.id, second.id])
+  })
+
   it('keeps the newest revision when save requests arrive out of order', async () => {
     const store = await createStore()
     const original = await store.getActiveProject()
@@ -155,6 +169,30 @@ describe('ProjectStore', () => {
     expect(reset.project.background.mode).toBe('transparent')
     await expect(readFile(backgroundPath)).rejects.toThrow()
     expect(reset.project.revision).toBeGreaterThan(cleared.project.revision)
+  })
+
+  it('resets all display data to one new empty display while keeping app settings', async () => {
+    const store = await createStore()
+    const original = await store.getActiveProject()
+    const source = join(temporaryRoots[0], 'reset-all-figure.obj')
+    await writeFile(source, 'o ResetAllFigure\nv 0 0 0\n', 'utf8')
+    const [asset] = await store.importFiles(original.id, [source])
+    const copiedPath = store.resolveAssetPath(original.id, asset.relativePath)
+    const duplicate = await store.duplicateProject(original.id)
+    await store.updateSettings({ quality: 'high', alwaysOnTop: true })
+
+    const reset = await store.resetData()
+
+    expect(reset.projects).toHaveLength(1)
+    expect(reset.project.id).not.toBe(original.id)
+    expect(reset.project.items).toEqual([])
+    expect(reset.project.casePreset).toBe('gallery')
+    expect(reset.activeProjectId).toBe(reset.project.id)
+    expect(store.settings.quality).toBe('high')
+    expect(store.settings.alwaysOnTop).toBe(true)
+    await expect(readFile(copiedPath)).rejects.toThrow()
+    await expect(store.loadProject(original.id)).rejects.toThrow()
+    await expect(store.loadProject(duplicate.project.id)).rejects.toThrow()
   })
 
   it('copies imported assets into the active project', async () => {

@@ -49,25 +49,22 @@ export function pickItemSelection(raycaster: THREE.Raycaster, itemRoots: THREE.O
   return null
 }
 
-export function hitsVisibleTransformHandle(raycaster: THREE.Raycaster, gizmo: THREE.Object3D | null): boolean {
-  if (!gizmo?.visible) return false
-  return raycaster.intersectObject(gizmo, true)
-    .some((hit) => {
-      if (!isVisibleThroughRoot(hit.object, gizmo)) return false
+type TransformHoverControls = {
+  axis: string | null
+  pointerHover: (pointer: PointerEvent | null) => void
+}
 
-      // TransformControls includes a 100000x100000 drag plane beneath the
-      // rendered arrows. Its object remains visible for raycasting while only
-      // its material is hidden, so treating it as a handle blocks every scene
-      // click after the first selection.
-      if ((hit.object as THREE.Object3D & { isTransformControlsPlane?: boolean }).isTransformControlsPlane) {
-        return false
-      }
-
-      const material = (hit.object as THREE.Mesh).material
-      if (!material) return false
-      const materials = Array.isArray(material) ? material : [material]
-      return materials.some((entry) => entry.visible && (!entry.transparent || entry.opacity > 0.01))
-    })
+export function transformAxisAtPointer(
+  controls: TransformHoverControls | null,
+  pointer: THREE.Vector2,
+  button: number
+): string | null {
+  // Use TransformControls' own picker at the exact pointerdown coordinate.
+  // This handles direct presses as well as prior hover and prevents a stale
+  // highlighted axis from surviving after the pointer moved away.
+  if (!controls) return null
+  controls.pointerHover({ x: pointer.x, y: pointer.y, button } as unknown as PointerEvent)
+  return controls.axis
 }
 
 export function pickSceneSelection(

@@ -18,8 +18,8 @@ import type {
 } from '../../../shared/types'
 import { createDefaultDisplayTransform, DISPLAY_CASE_SELECTION_ID } from '../../../shared/types'
 import { cameraSettingsEqual, shouldApplySyncedCamera } from '../../../shared/camera'
-import { findOpenImportPosition, isPlacementBelowSafetyFloor } from './itemPlacement'
-import { hitsVisibleTransformHandle, pickSceneSelection } from './sceneSelection'
+import { findOpenImportPosition, fitImportedItemScale, isPlacementBelowSafetyFloor } from './itemPlacement'
+import { pickSceneSelection, transformAxisAtPointer } from './sceneSelection'
 
 interface SceneCallbacks {
   onSelect: (id: string | null) => void
@@ -337,6 +337,7 @@ export class SceneRuntime {
   private selectedId: string | null = null
   private transformMode: TransformMode = 'translate'
   private draggingTransform = false
+  private activeTransformId: string | null = null
   private dragTarget: DragTarget | null = null
   private settlementReported = true
   private casePreset: CasePreset | null = null
@@ -546,6 +547,10 @@ export class SceneRuntime {
 
   setSelection(id: string | null): void {
     this.selectedId = id
+    // TransformControls mutates its attached object directly. Keep that object
+    // fixed for the entire gesture even if a project sync requests another
+    // selection before pointerup.
+    if (this.draggingTransform) return
     if (id === DISPLAY_CASE_SELECTION_ID) {
       this.selectionHelper.setFromObject(this.displayRoot)
       const caseVisible = this.project?.caseVisible !== false
@@ -570,6 +575,16 @@ export class SceneRuntime {
   setTransformMode(mode: TransformMode): void {
     this.transformMode = mode
     this.transformControls?.setMode(mode)
+  }
+
+  private attachedTransformId(): string | null {
+    const attached = this.transformControls?.object
+    if (!attached) return null
+    if (attached === this.displayRoot) return DISPLAY_CASE_SELECTION_ID
+    for (const runtime of this.items.values()) {
+      if (runtime.root === attached) return runtime.id
+    }
+    return null
   }
 
   private getCameraSettings(): CameraSettings {
@@ -866,6 +881,7 @@ export class SceneRuntime {
     }
 
     const placedItem = cloneItem(latest)
+    if (autoPlace) placedItem.transform.scale = fitImportedItemScale(loaded.bounds, placedItem.transform)
     const requiresRecovery = isPlacementBelowSafetyFloor(loaded.bounds, placedItem.transform)
     if (autoPlace || requiresRecovery) {
       const occupied = [...this.items.values()]
@@ -1334,17 +1350,27 @@ export class SceneRuntime {
   }
 
   private handleTransformDragging(dragging: boolean): void {
-    if (this.selectedId === DISPLAY_CASE_SELECTION_ID) {
-      this.draggingTransform = dragging
-      this.dragTarget = null
-      this.controls.enabled = !dragging
-      if (!dragging) this.callbacks.onTransform(DISPLAY_CASE_SELECTION_ID, transformOf(this.displayRoot), true)
-      return
-    }
-    const runtime = this.selectedId ? this.items.get(this.selectedId) : null
-    if (!runtime?.body || !this.world) return
+    if (dragging) this.activeTransformId = this.attachedTransformId()
+    const transformId = this.activeTransformId
     this.draggingTransform = dragging
     this.controls.enabled = !dragging
+    if (transformId === DISPLAY_CASE_SELECTION_ID) {
+      this.dragTarget = null
+      if (!dragging) {
+        this.callbacks.onTransform(DISPLAY_CASE_SELECTION_ID, transformOf(this.displayRoot), true)
+        this.activeTransformId = null
+        this.setSelection(this.selectedId)
+      }
+      return
+    }
+    const runtime = transformId ? this.items.get(transformId) : null
+    if (!runtime?.body || !this.world) {
+      if (!dragging) {
+        this.activeTransformId = null
+        this.setSelection(this.selectedId)
+      }
+      return
+    }
     if (dragging) {
       runtime.body.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased, true)
       runtime.body.setLinvel({ x: 0, y: 0, z: 0 }, true)
@@ -1384,15 +1410,17 @@ export class SceneRuntime {
       runtime.snapshot.transform = transform
       this.rebuildPhysics(runtime)
       this.callbacks.onTransform(runtime.id, transform, true)
+      this.activeTransformId = null
+      this.setSelection(this.selectedId)
     }
   }
 
   private handleTransformObjectChange(): void {
-    if (this.selectedId === DISPLAY_CASE_SELECTION_ID && this.draggingTransform) {
+    if (this.activeTransformId === DISPLAY_CASE_SELECTION_ID && this.draggingTransform) {
       this.selectionHelper.update()
       return
     }
-    const runtime = this.selectedId ? this.items.get(this.selectedId) : null
+    const runtime = this.activeTransformId ? this.items.get(this.activeTransformId) : null
     if (!runtime?.body || !this.draggingTransform) return
     if (this.dragTarget?.id === runtime.id) {
       this.dragTarget.position.copy(runtime.root.position)
@@ -1502,12 +1530,13 @@ export class SceneRuntime {
       .filter((runtime) => runtime.snapshot.visible !== false)
       .map((runtime) => runtime.root)
 
-    const controlsHelper = this.transformControls?.getHelper() ?? null
-    if (hitsVisibleTransformHandle(this.raycaster, controlsHelper)) return
+    // TransformControls highlights its own (intentionally forgiving) picker,
+    // not the thin rendered ring. Refresh that same picker at pointerdown so a
+    // direct press or visible hover cannot fall through to the case behind it.
+    if (transformAxisAtPointer(this.transformControls, this.pointer, event.button) !== null) return
 
-    // The native TransformControls picker is deliberately much wider than the
-    // rendered arrows. Disable it for this pointerdown unless a visible handle
-    // was hit, so ordinary scene clicks reach the object actually under them.
+    // When no axis was highlighted, keep the forgiving native picker from
+    // claiming a normal scene click at pointerdown.
     if (this.transformControls) {
       const controls = this.transformControls
       const wasEnabled = controls.enabled

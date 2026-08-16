@@ -170,9 +170,11 @@ export interface UnvirtualApi {
   createProject: (name?: string) => Promise<ProjectEvent>
   duplicateProject: (projectId: string) => Promise<ProjectEvent>
   deleteProject: (projectId: string) => Promise<ProjectEvent>
+  reorderProjects: (projectIds: string[]) => Promise<ProjectEvent>
   activateProject: (projectId: string) => Promise<ProjectEvent>
   saveProject: (project: DisplayProject) => Promise<ProjectEvent>
   resetProject: (projectId: string, scope: ProjectResetScope) => Promise<ProjectEvent>
+  resetData: () => Promise<ProjectEvent>
   previewProject: (project: DisplayProject) => void
   previewCamera: (preview: CameraPreviewEvent) => void
   exportProject: (projectId: string) => Promise<boolean>

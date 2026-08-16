@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
 import type { TransformState } from '../../../shared/types'
-import { findOpenImportPosition, isPlacementBelowSafetyFloor, transformedItemBounds } from './itemPlacement'
+import { findOpenImportPosition, fitImportedItemScale, isPlacementBelowSafetyFloor, transformedItemBounds } from './itemPlacement'
 
 const transform: TransformState = {
   position: { x: 0, y: 0, z: 0 },
@@ -82,5 +82,46 @@ describe('findOpenImportPosition', () => {
       ...transform,
       position: { x: 0, y: -0.18, z: 2 }
     })).toBe(false)
+  })
+
+  it('uniformly shrinks a new import to the safe shelf height', () => {
+    const oversized = new THREE.Box3(
+      new THREE.Vector3(-0.75, 0, -0.35),
+      new THREE.Vector3(0.75, 1.2, 0.35)
+    )
+
+    const scale = fitImportedItemScale(oversized, transform)
+
+    expect(scale.x).toBeCloseTo(0.8)
+    expect(scale.y).toBeCloseTo(0.8)
+    expect(scale.z).toBeCloseTo(0.8)
+  })
+
+  it('does not enlarge an import that already fits safely', () => {
+    const compact = new THREE.Box3(
+      new THREE.Vector3(-0.45, 0, -0.25),
+      new THREE.Vector3(0.45, 0.8, 0.25)
+    )
+
+    expect(fitImportedItemScale(compact, transform)).toEqual(transform.scale)
+  })
+
+  it('uses the same fitted scale regardless of which shelf receives the item', () => {
+    const oversized = new THREE.Box3(
+      new THREE.Vector3(-0.75, 0, -0.35),
+      new THREE.Vector3(0.75, 1.2, 0.35)
+    )
+
+    const topShelf = fitImportedItemScale(oversized, {
+      ...transform,
+      position: { x: -1.4, y: 2.83, z: 0.6 }
+    })
+    const bottomShelf = fitImportedItemScale(oversized, {
+      ...transform,
+      position: { x: 1.2, y: 0, z: -0.8 }
+    })
+
+    expect(topShelf).toEqual(bottomShelf)
+    expect(topShelf).toEqual({ x: 0.8, y: 0.8, z: 0.8 })
   })
 })

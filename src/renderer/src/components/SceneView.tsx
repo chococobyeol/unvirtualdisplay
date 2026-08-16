@@ -22,6 +22,7 @@ export interface SceneViewHandle {
 }
 
 export const SceneView = forwardRef<SceneViewHandle, SceneViewProps>(function SceneView({ project, quality, variant, selectedItemId = null, transformMode = 'translate', onSelect, onTransform, onCamera, cameraResetKey = 0, onResetCamera, resetCameraLabel }, ref): React.JSX.Element {
+  const Runtime = SceneRuntime
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const runtimeRef = useRef<SceneRuntime | null>(null)
   const projectRef = useRef(project)
@@ -34,7 +35,7 @@ export const SceneView = forwardRef<SceneViewHandle, SceneViewProps>(function Sc
     const canvas = canvasRef.current
     if (!canvas) return
     let cancelled = false
-    const runtime = new SceneRuntime(canvas, variant, quality, {
+    const runtime = new Runtime(canvas, variant, quality, {
       onSelect: (id) => callbacksRef.current.onSelect?.(id),
       onTransform: (id, transform, remember) => callbacksRef.current.onTransform?.(id, transform, remember),
       onCameraPreview: (camera) => window.unvirtual.previewCamera({ projectId: projectRef.current.id, camera }),
@@ -52,7 +53,7 @@ export const SceneView = forwardRef<SceneViewHandle, SceneViewProps>(function Sc
       runtime.dispose()
       runtimeRef.current = null
     }
-  }, [variant])
+  }, [variant, Runtime])
 
   useEffect(() => { void runtimeRef.current?.syncProject(project) }, [project])
   useEffect(() => window.unvirtual.onCameraPreview(({ projectId, camera }) => {
