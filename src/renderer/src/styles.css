@@ -165,6 +165,9 @@ button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke
 .case-switcher > span { font-size: 11px; color: var(--muted); margin-right: 4px; }
 .save-status { flex: none; white-space: nowrap; font-size: 11px; color: #807a72; width: 73px; text-align: right; }
 .save-status.saving { color: var(--accent); }
+.display-visibility-button { flex: none; border-color: var(--line); color: #777169; }
+.display-visibility-button.visible { color: #b99a6d; }
+.display-visibility-button:hover:not(:disabled) { border-color: rgba(231,184,114,.3); color: var(--accent); }
 .capture-button { border-color: var(--line); flex: none; }
 .settings-button { flex: none; border-color: var(--line); color: #99928a; }
 .settings-button:hover, .settings-button.active { border-color: rgba(231,184,114,.3); background: rgba(231,184,114,.11); color: var(--accent); }

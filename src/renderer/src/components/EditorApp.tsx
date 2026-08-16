@@ -13,6 +13,8 @@ import {
   FileInput,
   FileOutput,
   Image as ImageIcon,
+  Monitor,
+  MonitorOff,
   Pencil,
   Plus,
   Redo2,
@@ -67,7 +69,9 @@ const ICONS = {
   more: Ellipsis,
   settings: Settings,
   close: X,
-  rename: Pencil
+  rename: Pencil,
+  monitor: Monitor,
+  monitorOff: MonitorOff
 } satisfies Record<string, LucideIcon>
 
 function Icon({ name }: { name: keyof typeof ICONS }): React.JSX.Element {
@@ -145,7 +149,7 @@ function moveMenuFocus(event: React.KeyboardEvent<HTMLDivElement>): void {
   items[next]?.focus()
 }
 
-function DisplayFileMenu({ onSaveCapture }: { onSaveCapture: () => void }): React.JSX.Element {
+function DisplayFileMenu(): React.JSX.Element {
   const { t } = useTranslation()
   const backup = useAppStore((state) => state.backupProject)
   const restore = useAppStore((state) => state.restoreProject)
@@ -203,11 +207,6 @@ function DisplayFileMenu({ onSaveCapture }: { onSaveCapture: () => void }): Reac
           setOpen(false)
           void backup()
         }}><Icon name="backup" /><span>{t('exportDisplayArchive')}</span></button>
-        <div className="menu-separator" role="separator" />
-        <button type="button" className="menu-item" role="menuitem" onClick={() => {
-          setOpen(false)
-          onSaveCapture()
-        }}><Icon name="camera" /><span>{t('capture')}</span></button>
       </div>}
     </div>
   )
@@ -1035,6 +1034,7 @@ export function EditorApp(): React.JSX.Element | null {
   const selectedId = useAppStore((state) => state.selectedItemId)
   const transformMode = useAppStore((state) => state.transformMode)
   const saveStatus = useAppStore((state) => state.saveStatus)
+  const displayVisible = useAppStore((state) => state.displayVisible)
   const history = useAppStore((state) => state.history)
   const future = useAppStore((state) => state.future)
   const importAssets = useAppStore((state) => state.importAssets)
@@ -1044,6 +1044,7 @@ export function EditorApp(): React.JSX.Element | null {
   const setMode = useAppStore((state) => state.setTransformMode)
   const undo = useAppStore((state) => state.undo)
   const redo = useAppStore((state) => state.redo)
+  const setDisplayVisible = useAppStore((state) => state.setDisplayVisible)
   const [draggingFiles, setDraggingFiles] = useState(false)
   const [cameraResetKey, setCameraResetKey] = useState(0)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -1110,12 +1111,20 @@ export function EditorApp(): React.JSX.Element | null {
             <button className="icon-button" disabled={!history.length} title={t('undo')} onClick={undo}><Icon name="undo" /></button>
             <button className="icon-button" disabled={!future.length} title={t('redo')} onClick={redo}><Icon name="redo" /></button>
           </div>
-          <DisplayFileMenu onSaveCapture={saveCapture} />
+          <DisplayFileMenu />
           <div className="case-switcher">
             <span>{t('displayCase')}</span>
             {CASES.map((preset) => <button key={preset} title={t(preset)} className={project.casePreset === preset ? 'active' : ''} onClick={() => changeCase(preset)}>{t(`${preset}Short`)}</button>)}
           </div>
           <span className={`save-status ${saveStatus}`}>{saveStatus === 'saving' ? t('saving') : t('saved')}</span>
+          <button
+            type="button"
+            className={`icon-button display-visibility-button${displayVisible ? ' visible' : ''}`}
+            title={t(displayVisible ? 'hideWidget' : 'showWidget')}
+            aria-label={t(displayVisible ? 'hideWidget' : 'showWidget')}
+            aria-pressed={displayVisible}
+            onClick={() => void setDisplayVisible(!displayVisible)}
+          ><Icon name={displayVisible ? 'monitor' : 'monitorOff'} /></button>
           <button className="icon-button capture-button" onClick={saveCapture} title={t('capture')} aria-label={t('capture')}><Icon name="camera" /></button>
           <button
             type="button"

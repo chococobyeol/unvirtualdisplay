@@ -31,7 +31,9 @@ const api: UnvirtualApi = {
   updateSettings: (patch: Partial<AppSettings>) => ipcRenderer.invoke('settings:update', patch),
   saveCapture: (suggestedName, data) => ipcRenderer.invoke('capture:save', suggestedName, data),
   exportDiagnostics: () => ipcRenderer.invoke('diagnostics:export'),
+  setDisplayVisible: (visible) => ipcRenderer.invoke('display:set-visible', visible),
   setDisplayEditing: (editing) => ipcRenderer.invoke('display:set-editing', editing),
+  showDisplayContextMenu: () => ipcRenderer.send('display:show-context-menu'),
   setDisplayPointerIgnored: (ignored) => ipcRenderer.send('display:set-pointer-ignored', ignored),
   startDisplayResize: (edge: DisplayResizeEdge, point) => ipcRenderer.send('display:resize-start', edge, point),
   updateDisplayResize: (point) => ipcRenderer.send('display:resize-update', point),
@@ -39,6 +41,11 @@ const api: UnvirtualApi = {
   startDisplayMove: (point) => ipcRenderer.send('display:move-start', point),
   updateDisplayMove: (point) => ipcRenderer.send('display:move-update', point),
   endDisplayMove: () => ipcRenderer.send('display:move-end'),
+  onDisplayVisibilityChanged: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, visible: boolean): void => listener(visible)
+    ipcRenderer.on('display:visibility-changed', handler)
+    return () => ipcRenderer.removeListener('display:visibility-changed', handler)
+  },
   onDisplayEditingChanged: (listener) => {
     const handler = (_event: Electron.IpcRendererEvent, editing: boolean): void => listener(editing)
     ipcRenderer.on('display:editing-changed', handler)

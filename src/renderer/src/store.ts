@@ -19,6 +19,7 @@ interface AppState {
   error: string | null
   role: BootstrapData['role']
   appVersion: string
+  displayVisible: boolean
   projects: ProjectSummary[]
   project: DisplayProject | null
   settings: AppSettings | null
@@ -44,6 +45,7 @@ interface AppState {
   backupProject: () => Promise<void>
   restoreProject: () => Promise<void>
   updateSettings: (patch: Partial<AppSettings>) => Promise<void>
+  setDisplayVisible: (visible: boolean) => Promise<void>
   undo: () => void
   redo: () => void
 }
@@ -197,6 +199,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   error: null,
   role: 'editor',
   appVersion: '0.0.0',
+  displayVisible: true,
   projects: [],
   project: null,
   settings: null,
@@ -216,6 +219,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         error: null,
         role: data.role,
         appVersion: data.appVersion,
+        displayVisible: data.displayVisible,
         projects: data.projects,
         project: withDisplayDefaults(data.activeProject),
         settings: data.settings
@@ -229,6 +233,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           void setLanguage(settings.language)
           set({ settings })
         })
+        window.unvirtual.onDisplayVisibilityChanged((displayVisible) => set({ displayVisible }))
       }
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) })
@@ -341,6 +346,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     const settings = await window.unvirtual.updateSettings(patch)
     await setLanguage(settings.language)
     set({ settings })
+  },
+  setDisplayVisible: async (visible) => {
+    set({ displayVisible: await window.unvirtual.setDisplayVisible(visible) })
   },
   undo: () => {
     const history = get().history

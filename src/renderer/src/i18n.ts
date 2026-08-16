@@ -72,6 +72,8 @@ const resources = {
       undo: '실행 취소',
       redo: '다시 실행',
       viewDisplay: '전시창 조작',
+      showWidget: '위젯 보이기',
+      hideWidget: '위젯 숨기기',
       settings: '설정',
       closeSettings: '설정 닫기',
       settingsGeneral: '일반',
@@ -141,7 +143,7 @@ const resources = {
       welcomeArrange: '자유롭게 진열해요',
       welcomeArrangeCopy: '겹치거나 쌓아도 되고, 중력과 넘어짐 방지가 배치를 도와줍니다.',
       welcomeDisplay: '전시창으로 감상해요',
-      welcomeDisplayCopy: '편집창을 닫아도 투명 전시창은 데스크톱에 남아 있습니다.',
+      welcomeDisplayCopy: '편집창을 최소화하면 투명 전시창만 데스크톱에 남아 있습니다.',
       startCreating: '첫 진열장 시작하기'
     }
   },
@@ -160,7 +162,7 @@ const resources = {
       playAnimation: 'Play animation', loop: 'Loop', speed: 'Speed', displayType: '2D display type', acrylic: 'Acrylic stand',
       acrylicShape: 'Plate shape', contour: 'Image outline', rectangle: 'Rectangle', ellipse: 'Circle · ellipse', acrylicOffset: 'Margin (%)',
       panel: 'Flat panel', frame: 'Frame', photocard: 'Photo card', translate: 'Move', rotate: 'Rotate', resize: 'Scale',
-      undo: 'Undo', redo: 'Redo', viewDisplay: 'Interact with display', settings: 'Settings', closeSettings: 'Close settings', settingsGeneral: 'General', settingsWidget: 'Widget', settingsDiagnostics: 'Diagnostics', dataManagement: 'Data management', resetData: 'Reset display data', resetDataDescription: 'Delete every saved display and item file, then start again with one empty display. Language and widget settings are kept.', resetDataConfirm: 'Delete every saved display and item file? This cannot be undone.', language: 'Language',
+      undo: 'Undo', redo: 'Redo', viewDisplay: 'Interact with display', showWidget: 'Show widget', hideWidget: 'Hide widget', settings: 'Settings', closeSettings: 'Close settings', settingsGeneral: 'General', settingsWidget: 'Widget', settingsDiagnostics: 'Diagnostics', dataManagement: 'Data management', resetData: 'Reset display data', resetDataDescription: 'Delete every saved display and item file, then start again with one empty display. Language and widget settings are kept.', resetDataConfirm: 'Delete every saved display and item file? This cannot be undone.', language: 'Language',
       alwaysOnTop: 'Keep display on top', clickThrough: 'Click through while viewing',
       clickThroughHint: 'When enabled, the entire widget passes clicks through. Transparent pixels still pass through when disabled.',
       adjustWidget: 'Adjust widget position and size', widgetAdjustHelp: 'Drag anywhere to move · Drag the border to resize', done: 'Done',
@@ -178,7 +180,7 @@ const resources = {
       welcomeCopy: 'Models and images stay on this device. No account or upload is needed.', welcomeImport: 'Bring in your files',
       welcomeImportCopy: 'Models and images are normalized to a display-friendly size.', welcomeArrange: 'Arrange without slots',
       welcomeArrangeCopy: 'Overlap or stack items while gravity and prevent-toppling help.', welcomeDisplay: 'Enjoy the display window',
-      welcomeDisplayCopy: 'The transparent display remains on your desktop after the editor closes.', startCreating: 'Start my first display'
+      welcomeDisplayCopy: 'Minimize the editor to leave only the transparent display on your desktop.', startCreating: 'Start my first display'
     }
   },
   ja: {
@@ -196,7 +198,7 @@ const resources = {
       playAnimation: 'アニメーション再生', loop: 'ループ', speed: '速度', displayType: '2D展示形式', acrylic: 'アクリルスタンド',
       acrylicShape: 'プレート形状', contour: '画像の輪郭', rectangle: '四角形', ellipse: '円形・楕円', acrylicOffset: '余白 (%)',
       panel: 'フラットパネル', frame: 'フレーム', photocard: 'フォトカード', translate: '移動', rotate: '回転', resize: 'サイズ',
-      undo: '元に戻す', redo: 'やり直す', viewDisplay: '展示ウィンドウを操作', settings: '設定', closeSettings: '設定を閉じる', settingsGeneral: '一般', settingsWidget: 'ウィジェット', settingsDiagnostics: '診断', dataManagement: 'データ管理', resetData: '展示データを初期化', resetDataDescription: '保存されているすべてのディスプレイと展示物ファイルを削除し、空のディスプレイ1つからやり直します。言語とウィジェット設定は保持されます。', resetDataConfirm: '保存されているすべてのディスプレイと展示物ファイルを削除しますか？この操作は元に戻せません。', language: '言語',
+      undo: '元に戻す', redo: 'やり直す', viewDisplay: '展示ウィンドウを操作', showWidget: 'ウィジェットを表示', hideWidget: 'ウィジェットを隠す', settings: '設定', closeSettings: '設定を閉じる', settingsGeneral: '一般', settingsWidget: 'ウィジェット', settingsDiagnostics: '診断', dataManagement: 'データ管理', resetData: '展示データを初期化', resetDataDescription: '保存されているすべてのディスプレイと展示物ファイルを削除し、空のディスプレイ1つからやり直します。言語とウィジェット設定は保持されます。', resetDataConfirm: '保存されているすべてのディスプレイと展示物ファイルを削除しますか？この操作は元に戻せません。', language: '言語',
       alwaysOnTop: '展示を常に手前に表示', clickThrough: '鑑賞中はクリックを透過',
       clickThroughHint: 'オンにするとウィジェット全体でクリックを透過します。オフでも透明部分は自動的に透過します。',
       adjustWidget: '位置とサイズを調整', widgetAdjustHelp: 'どこでもドラッグして移動・枠をドラッグしてサイズ変更', done: '完了',
@@ -214,7 +216,7 @@ const resources = {
       welcomeCopy: 'モデルと画像はこの端末だけに保存されます。アカウントやアップロードは不要です。', welcomeImport: 'ファイルを追加',
       welcomeImportCopy: '3Dモデルや画像を展示しやすいサイズに自動調整します。', welcomeArrange: '自由に配置',
       welcomeArrangeCopy: '重ねたり積んだりでき、重力と転倒防止が配置を助けます。', welcomeDisplay: '展示ウィンドウで鑑賞',
-      welcomeDisplayCopy: '編集画面を閉じても透明な展示ウィンドウはデスクトップに残ります。', startCreating: '最初の展示を始める'
+      welcomeDisplayCopy: '編集画面を最小化すると、透明な展示ウィンドウだけがデスクトップに残ります。', startCreating: '最初の展示を始める'
     }
   },
   'zh-Hans': {
@@ -230,7 +232,7 @@ const resources = {
       loop: '循环', speed: '速度', displayType: '2D 展示形式', acrylic: '亚克力立牌',
       acrylicShape: '板材形状', contour: '图片轮廓', rectangle: '矩形', ellipse: '圆形・椭圆', acrylicOffset: '边距 (%)', panel: '平面展板', frame: '相框',
       photocard: '小卡', translate: '移动', rotate: '旋转', resize: '缩放', undo: '撤销', redo: '重做',
-      viewDisplay: '操作展示窗口', settings: '设置', closeSettings: '关闭设置', settingsGeneral: '通用', settingsWidget: '小组件', settingsDiagnostics: '诊断', dataManagement: '数据管理', resetData: '重置展示数据', resetDataDescription: '删除所有已保存的展示柜和展品文件，并从一个空展示柜重新开始。语言和小组件设置将保留。', resetDataConfirm: '要删除所有已保存的展示柜和展品文件吗？此操作无法撤销。', language: '语言', alwaysOnTop: '展示窗口置顶',
+      viewDisplay: '操作展示窗口', showWidget: '显示小组件', hideWidget: '隐藏小组件', settings: '设置', closeSettings: '关闭设置', settingsGeneral: '通用', settingsWidget: '小组件', settingsDiagnostics: '诊断', dataManagement: '数据管理', resetData: '重置展示数据', resetDataDescription: '删除所有已保存的展示柜和展品文件，并从一个空展示柜重新开始。语言和小组件设置将保留。', resetDataConfirm: '要删除所有已保存的展示柜和展品文件吗？此操作无法撤销。', language: '语言', alwaysOnTop: '展示窗口置顶',
       clickThrough: '观赏时点击穿透', clickThroughHint: '开启后整个小组件都会穿透点击；关闭后透明区域仍会自动穿透。',
       adjustWidget: '调整小组件位置和大小', widgetAdjustHelp: '拖动任意位置移动 · 拖动边框调整大小', done: '完成',
       widgetBackground: '小组件背景', backgroundMode: '背景方式', backgroundTransparent: '透明', backgroundSolid: '纯色', backgroundImage: '图片',
@@ -245,7 +247,7 @@ const resources = {
       welcomeCopy: '模型和图片只保存在本机，无需账号或上传。', welcomeImport: '导入文件',
       welcomeImportCopy: '3D 模型和图片会自动调整为适合展示的大小。', welcomeArrange: '自由陈列',
       welcomeArrangeCopy: '可以重叠或堆放，重力和防倾倒功能会帮助你。', welcomeDisplay: '在展示窗口中欣赏',
-      welcomeDisplayCopy: '关闭编辑器后，透明展示窗口仍会保留在桌面上。', startCreating: '开始第一个展示柜'
+      welcomeDisplayCopy: '最小化编辑器后，桌面上只保留透明展示窗口。', startCreating: '开始第一个展示柜'
     }
   }
 } as const

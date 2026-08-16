@@ -29,6 +29,7 @@ let store: ProjectStore
 let isQuitting = false
 let boundsSaveTimer: ReturnType<typeof setTimeout> | null = null
 let displayEditing = false
+let displayVisible = true
 let displayResize: {
   edge: DisplayResizeEdge
   start: { x: number; y: number }
@@ -38,11 +39,64 @@ let displayMove: {
   start: { x: number; y: number }
   bounds: Electron.Rectangle
 } | null = null
+let hasShownTrayHint = false
 let quitSaveInProgress = false
 let quitSaveComplete = false
 const latestProjectPreviews = new Map<string, DisplayProject>()
 const diagnosticLines: string[] = []
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
+
+const trayTranslations: Record<AppSettings['language'], {
+  openEditor: string
+  hideEditor: string
+  showWidget: string
+  hideWidget: string
+  clickThrough: string
+  adjustWidget: string
+  quit: string
+  stillRunning: string
+}> = {
+  ko: {
+    openEditor: '편집창 열기',
+    hideEditor: '편집창 숨기기',
+    showWidget: '위젯 표시',
+    hideWidget: '위젯 숨기기',
+    clickThrough: '감상 중 클릭 통과',
+    adjustWidget: '위젯 위치·크기 조정',
+    quit: 'Unvirtual Display 종료',
+    stillRunning: '위젯은 계속 실행 중입니다. 이 아이콘에서 편집창을 열거나 앱을 종료할 수 있습니다.'
+  },
+  en: {
+    openEditor: 'Open editor',
+    hideEditor: 'Hide editor',
+    showWidget: 'Show widget',
+    hideWidget: 'Hide widget',
+    clickThrough: 'Click through while viewing',
+    adjustWidget: 'Adjust widget',
+    quit: 'Quit Unvirtual Display',
+    stillRunning: 'The widget is still running. Use this icon to reopen the editor or quit the app.'
+  },
+  ja: {
+    openEditor: '編集画面を開く',
+    hideEditor: '編集画面を隠す',
+    showWidget: 'ウィジェットを表示',
+    hideWidget: 'ウィジェットを隠す',
+    clickThrough: '鑑賞中はクリックを透過',
+    adjustWidget: '位置とサイズを調整',
+    quit: 'Unvirtual Displayを終了',
+    stillRunning: 'ウィジェットは実行中です。このアイコンから編集画面を開くか、アプリを終了できます。'
+  },
+  'zh-Hans': {
+    openEditor: '打开编辑器',
+    hideEditor: '隐藏编辑器',
+    showWidget: '显示小组件',
+    hideWidget: '隐藏小组件',
+    clickThrough: '观赏时点击穿透',
+    adjustWidget: '调整小组件',
+    quit: '退出 Unvirtual Display',
+    stillRunning: '小组件仍在运行。可通过此图标重新打开编辑器或退出应用。'
+  }
+}
 
 if (!hasSingleInstanceLock) app.quit()
 
@@ -96,10 +150,87 @@ function attachDiagnostics(window: BrowserWindow, role: 'editor' | 'display'): v
   })
 }
 
+function currentTrayLabels(): (typeof trayTranslations)[AppSettings['language']] {
+  return trayTranslations[store.settings.language] ?? trayTranslations.en
+}
+
+function showTrayHint(): void {
+  if (process.platform !== 'win32' || !tray || tray.isDestroyed() || hasShownTrayHint) return
+  hasShownTrayHint = true
+  tray.displayBalloon({
+    iconType: 'info',
+    title: 'Unvirtual Display',
+    content: currentTrayLabels().stillRunning,
+    noSound: true,
+    respectQuietTime: true
+  })
+}
+
+function hideEditorWindowToTray(showHint = false): void {
+  if (!editorWindow || editorWindow.isDestroyed()) return
+  editorWindow.hide()
+  if (process.platform === 'darwin') app.dock?.hide()
+  refreshTrayMenu()
+  if (showHint) showTrayHint()
+}
+
+function setDisplayWindowVisible(visible: boolean): void {
+  if (!displayWindow || displayWindow.isDestroyed()) return
+  displayVisible = visible
+  if (visible) {
+    displayWindow.showInactive()
+    applyDisplaySettings(store.settings)
+  } else {
+    setDisplayEditing(false)
+    displayWindow.hide()
+  }
+  publishDisplayVisibility()
+}
+
+function publishDisplayVisibility(): void {
+  if (displayWindow && !displayWindow.isDestroyed()) displayVisible = displayWindow.isVisible()
+  broadcast('display:visibility-changed', displayVisible)
+  refreshTrayMenu()
+}
+
+function updateClickThroughFromMenu(clickThrough: boolean): void {
+  void store.updateSettings({ clickThrough }).then((settings) => {
+    applyDisplaySettings(settings)
+    broadcast('settings:changed', { settings })
+    refreshTrayMenu()
+  })
+}
+
+function showDisplayContextMenu(): void {
+  if (!displayWindow || displayWindow.isDestroyed() || store.settings.clickThrough) return
+  const labels = currentTrayLabels()
+  Menu.buildFromTemplate([
+    { label: labels.openEditor, click: () => { void createEditorWindow() } },
+    { label: labels.hideWidget, click: () => setDisplayWindowVisible(false) },
+    {
+      label: labels.clickThrough,
+      type: 'checkbox',
+      checked: store.settings.clickThrough,
+      click: (item) => updateClickThroughFromMenu(item.checked)
+    },
+    { label: labels.adjustWidget, click: () => setDisplayEditing(true) },
+    { type: 'separator' },
+    { label: labels.quit, click: requestAppQuit }
+  ]).popup({ window: displayWindow })
+}
+
+function requestAppQuit(): void {
+  isQuitting = true
+  app.quit()
+}
+
 async function createEditorWindow(): Promise<BrowserWindow> {
+  if (process.platform === 'darwin') await app.dock?.show()
   if (editorWindow && !editorWindow.isDestroyed()) {
+    if (editorWindow.isMinimized()) editorWindow.restore()
     editorWindow.show()
     editorWindow.focus()
+    refreshTrayMenu()
     return editorWindow
   }
 
@@ -114,15 +245,25 @@ async function createEditorWindow(): Promise<BrowserWindow> {
     webPreferences: commonWebPreferences()
   })
 
-  editorWindow.once('ready-to-show', () => editorWindow?.show())
-  attachDiagnostics(editorWindow, 'editor')
-  editorWindow.on('close', (event) => {
-    if (!isQuitting && displayWindow && !displayWindow.isDestroyed()) {
-      event.preventDefault()
-      editorWindow?.hide()
-    }
+  editorWindow.once('ready-to-show', () => {
+    editorWindow?.show()
+    refreshTrayMenu()
   })
-  editorWindow.on('closed', () => { editorWindow = null })
+  attachDiagnostics(editorWindow, 'editor')
+  editorWindow.on('minimize', () => {
+    if (process.platform !== 'darwin') setImmediate(() => hideEditorWindowToTray(true))
+  })
+  editorWindow.on('close', (event) => {
+    if (isQuitting) return
+    event.preventDefault()
+    requestAppQuit()
+  })
+  editorWindow.on('show', refreshTrayMenu)
+  editorWindow.on('hide', refreshTrayMenu)
+  editorWindow.on('closed', () => {
+    editorWindow = null
+    refreshTrayMenu()
+  })
   editorWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://')) void shell.openExternal(url)
     return { action: 'deny' }
@@ -145,14 +286,19 @@ async function createDisplayWindow(): Promise<BrowserWindow> {
     hasShadow: false,
     resizable: true,
     alwaysOnTop: settings.alwaysOnTop,
-    skipTaskbar: false,
+    skipTaskbar: true,
     show: false,
     webPreferences: commonWebPreferences()
   })
 
   displayWindow.setIgnoreMouseEvents(settings.clickThrough, { forward: true })
   attachDiagnostics(displayWindow, 'display')
-  displayWindow.once('ready-to-show', () => displayWindow?.showInactive())
+  displayWindow.once('ready-to-show', () => {
+    displayWindow?.showInactive()
+    publishDisplayVisibility()
+  })
+  displayWindow.on('show', publishDisplayVisibility)
+  displayWindow.on('hide', publishDisplayVisibility)
   displayWindow.on('move', queueDisplayBoundsSave)
   displayWindow.on('resize', queueDisplayBoundsSave)
   displayWindow.on('closed', () => {
@@ -212,6 +358,7 @@ function registerIpc(): void {
     return {
       role,
       appVersion: app.getVersion(),
+      displayVisible,
       projects: await store.listProjects(),
       activeProject: await store.getActiveProject(),
       settings: store.settings
@@ -340,6 +487,7 @@ function registerIpc(): void {
     const settings = await store.updateSettings(patch)
     applyDisplaySettings(settings)
     broadcast('settings:changed', { settings })
+    refreshTrayMenu()
     return settings
   })
   ipcMain.handle('capture:save', async (_event, suggestedName: string, data: Uint8Array) => {
@@ -379,6 +527,14 @@ function registerIpc(): void {
   })
   ipcMain.handle('display:set-editing', (_event, editing: boolean) => {
     setDisplayEditing(editing)
+  })
+  ipcMain.handle('display:set-visible', (_event, visible: boolean) => {
+    setDisplayWindowVisible(visible)
+    return displayVisible
+  })
+  ipcMain.on('display:show-context-menu', (event) => {
+    if (event.sender !== displayWindow?.webContents || store.settings.clickThrough) return
+    showDisplayContextMenu()
   })
   ipcMain.on('display:set-pointer-ignored', (event, ignored: boolean) => {
     if (event.sender !== displayWindow?.webContents || displayEditing || displayMove || store.settings.clickThrough) return
@@ -431,33 +587,50 @@ function registerIpc(): void {
   })
 }
 
+function refreshTrayMenu(): void {
+  if (!tray || tray.isDestroyed()) return
+  const labels = currentTrayLabels()
+  const editorVisible = Boolean(editorWindow && !editorWindow.isDestroyed() && editorWindow.isVisible())
+  const widgetVisible = Boolean(displayWindow && !displayWindow.isDestroyed() && displayWindow.isVisible())
+  tray.setContextMenu(Menu.buildFromTemplate([
+    {
+      label: editorVisible ? labels.hideEditor : labels.openEditor,
+      click: () => {
+        if (editorWindow && !editorWindow.isDestroyed() && editorWindow.isVisible()) hideEditorWindowToTray()
+        else void createEditorWindow()
+      }
+    },
+    {
+      label: widgetVisible ? labels.hideWidget : labels.showWidget,
+      click: () => setDisplayWindowVisible(!widgetVisible)
+    },
+    {
+      label: labels.clickThrough,
+      type: 'checkbox',
+      checked: store.settings.clickThrough,
+      click: (item) => updateClickThroughFromMenu(item.checked)
+    },
+    {
+      label: labels.adjustWidget,
+      click: () => {
+        setDisplayWindowVisible(true)
+        setDisplayEditing(true)
+      }
+    },
+    { type: 'separator' },
+    { label: labels.quit, click: requestAppQuit }
+  ]))
+}
+
 function createTray(): void {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22"><path fill="#fff" d="M3 3h16v16H3zm2 2v12h12V5zm2 2h8v2H7zm0 4h3v4H7zm5 0h3v4h-3z"/></svg>`
   const icon = nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`)
-  icon.setTemplateImage(true)
+  icon.setTemplateImage(process.platform === 'darwin')
   tray = new Tray(icon)
-  const updateMenu = (): void => {
-    tray?.setContextMenu(Menu.buildFromTemplate([
-      { label: 'Open editor', click: () => { void createEditorWindow() } },
-      {
-        label: 'Click through',
-        type: 'checkbox',
-        checked: store.settings.clickThrough,
-        click: (item) => {
-          void store.updateSettings({ clickThrough: item.checked }).then((settings) => {
-            applyDisplaySettings(settings)
-            broadcast('settings:changed', { settings })
-          })
-        }
-      },
-      { label: 'Adjust widget', click: () => setDisplayEditing(true) },
-      { type: 'separator' },
-      { label: 'Quit', click: () => { isQuitting = true; app.quit() } }
-    ]))
-  }
-  updateMenu()
+  refreshTrayMenu()
   tray.setToolTip('Unvirtual Display')
-  tray.on('click', () => { void createEditorWindow() })
+  if (process.platform !== 'darwin') tray.on('click', () => { void createEditorWindow() })
+  tray.on('balloon-click', () => { void createEditorWindow() })
 }
 
 app.on('second-instance', () => {

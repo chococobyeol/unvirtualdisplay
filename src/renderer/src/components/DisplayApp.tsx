@@ -65,6 +65,80 @@ export function DisplayApp(): React.JSX.Element | null {
     }
   }, [editing, project, settings])
 
+  useEffect(() => {
+    if (!settings || settings.clickThrough) return
+    let resetTimer = 0
+    let secondaryClick: {
+      x: number
+      y: number
+      moved: boolean
+      released: boolean
+      menuRequested: boolean
+      shown: boolean
+    } | null = null
+
+    const reset = (): void => {
+      secondaryClick = null
+      if (resetTimer) window.clearTimeout(resetTimer)
+      resetTimer = 0
+    }
+    const showIfReady = (): void => {
+      if (!secondaryClick || secondaryClick.shown || secondaryClick.moved || !secondaryClick.released || !secondaryClick.menuRequested) return
+      secondaryClick.shown = true
+      window.unvirtual.showDisplayContextMenu()
+    }
+    const handlePointerDown = (event: PointerEvent): void => {
+      if (event.button !== 2) return
+      reset()
+      secondaryClick = {
+        x: event.screenX,
+        y: event.screenY,
+        moved: false,
+        released: false,
+        menuRequested: false,
+        shown: false
+      }
+    }
+    const handlePointerMove = (event: PointerEvent): void => {
+      if (!secondaryClick || secondaryClick.moved) return
+      const dx = event.screenX - secondaryClick.x
+      const dy = event.screenY - secondaryClick.y
+      if (dx * dx + dy * dy > 36) secondaryClick.moved = true
+    }
+    const handlePointerUp = (event: PointerEvent): void => {
+      if (event.button !== 2 || !secondaryClick) return
+      secondaryClick.released = true
+      showIfReady()
+      resetTimer = window.setTimeout(reset, 500)
+    }
+    const handlePointerCancel = (event: PointerEvent): void => {
+      if (event.button === 2) reset()
+    }
+    const handleContextMenu = (event: MouseEvent): void => {
+      event.preventDefault()
+      if (!secondaryClick) {
+        window.unvirtual.showDisplayContextMenu()
+        return
+      }
+      secondaryClick.menuRequested = true
+      showIfReady()
+    }
+
+    window.addEventListener('pointerdown', handlePointerDown, true)
+    window.addEventListener('pointermove', handlePointerMove, true)
+    window.addEventListener('pointerup', handlePointerUp, true)
+    window.addEventListener('pointercancel', handlePointerCancel, true)
+    window.addEventListener('contextmenu', handleContextMenu, true)
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown, true)
+      window.removeEventListener('pointermove', handlePointerMove, true)
+      window.removeEventListener('pointerup', handlePointerUp, true)
+      window.removeEventListener('pointercancel', handlePointerCancel, true)
+      window.removeEventListener('contextmenu', handleContextMenu, true)
+      reset()
+    }
+  }, [settings?.clickThrough])
+
   if (!project || !settings) return null
 
   const backgroundStyle: CSSProperties = (() => {

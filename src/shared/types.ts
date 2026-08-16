@@ -135,6 +135,7 @@ export interface AppSettings {
 export interface BootstrapData {
   role: 'editor' | 'display'
   appVersion: string
+  displayVisible: boolean
   projects: ProjectSummary[]
   activeProject: DisplayProject
   settings: AppSettings
@@ -186,7 +187,9 @@ export interface UnvirtualApi {
   updateSettings: (patch: Partial<AppSettings>) => Promise<AppSettings>
   saveCapture: (suggestedName: string, data: Uint8Array) => Promise<boolean>
   exportDiagnostics: () => Promise<boolean>
+  setDisplayVisible: (visible: boolean) => Promise<boolean>
   setDisplayEditing: (editing: boolean) => Promise<void>
+  showDisplayContextMenu: () => void
   setDisplayPointerIgnored: (ignored: boolean) => void
   startDisplayResize: (edge: DisplayResizeEdge, point: { x: number; y: number }) => void
   updateDisplayResize: (point: { x: number; y: number }) => void
@@ -194,6 +197,7 @@ export interface UnvirtualApi {
   startDisplayMove: (point: { x: number; y: number }) => void
   updateDisplayMove: (point: { x: number; y: number }) => void
   endDisplayMove: () => void
+  onDisplayVisibilityChanged: (listener: (visible: boolean) => void) => () => void
   onDisplayEditingChanged: (listener: (editing: boolean) => void) => () => void
   onProjectChanged: (listener: (event: ProjectEvent) => void) => () => void
   onProjectPreview: (listener: (project: DisplayProject) => void) => () => void
