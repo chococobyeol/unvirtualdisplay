@@ -14,6 +14,22 @@ export function pickItemSelection(raycaster: THREE.Raycaster, itemRoots: THREE.O
   return itemIdFromHit(raycaster.intersectObjects(itemRoots, true)[0]?.object)
 }
 
+function isVisibleThroughRoot(object: THREE.Object3D, root: THREE.Object3D): boolean {
+  let current: THREE.Object3D | null = object
+  while (current) {
+    if (!current.visible) return false
+    if (current === root) return true
+    current = current.parent
+  }
+  return false
+}
+
+export function hitsVisibleTransformHandle(raycaster: THREE.Raycaster, gizmo: THREE.Object3D | null): boolean {
+  if (!gizmo?.visible) return false
+  return raycaster.intersectObject(gizmo, true)
+    .some((hit) => isVisibleThroughRoot(hit.object, gizmo))
+}
+
 export function pickSceneSelection(
   raycaster: THREE.Raycaster,
   itemRoots: THREE.Object3D[],

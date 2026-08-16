@@ -19,7 +19,7 @@ import type {
 import { createDefaultDisplayTransform, DISPLAY_CASE_SELECTION_ID } from '../../../shared/types'
 import { cameraSettingsEqual } from '../../../shared/camera'
 import { findOpenImportPosition, isPlacementBelowSafetyFloor } from './itemPlacement'
-import { pickItemSelection, pickSceneSelection } from './sceneSelection'
+import { hitsVisibleTransformHandle, pickItemSelection, pickSceneSelection } from './sceneSelection'
 
 interface SceneCallbacks {
   onSelect: (id: string | null) => void
@@ -1485,6 +1485,9 @@ export class SceneRuntime {
     const itemRoots = [...this.items.values()]
       .filter((runtime) => runtime.snapshot.visible !== false)
       .map((runtime) => runtime.root)
+
+    const controlsHelper = this.transformControls?.getHelper() ?? null
+    if (hitsVisibleTransformHandle(this.raycaster, controlsHelper)) return
 
     const itemId = pickItemSelection(this.raycaster, itemRoots)
     if (itemId && itemId !== this.selectedId) {

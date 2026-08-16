@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
 import { DISPLAY_CASE_SELECTION_ID } from '../../../shared/types'
-import { pickSceneSelection } from './sceneSelection'
+import { hitsVisibleTransformHandle, pickSceneSelection } from './sceneSelection'
 
 function centerRay(): THREE.Raycaster {
   const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100)
@@ -46,5 +46,22 @@ describe('pickSceneSelection', () => {
 
   it('returns no selection when the pointer hits empty space', () => {
     expect(pickSceneSelection(centerRay(), [], null)).toBeNull()
+  })
+
+  it('only treats rendered gizmo geometry as a visible handle', () => {
+    const gizmo = new THREE.Group()
+    const visibleArrow = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.2, 0.2))
+    visibleArrow.position.z = 1
+    gizmo.add(visibleArrow)
+
+    const invisiblePicker = new THREE.Group()
+    invisiblePicker.visible = false
+    invisiblePicker.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 0.2)))
+    gizmo.add(invisiblePicker)
+    gizmo.updateMatrixWorld(true)
+
+    expect(hitsVisibleTransformHandle(centerRay(), gizmo)).toBe(true)
+    visibleArrow.visible = false
+    expect(hitsVisibleTransformHandle(centerRay(), gizmo)).toBe(false)
   })
 })
