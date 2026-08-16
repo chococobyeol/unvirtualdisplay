@@ -136,8 +136,8 @@ export class ProjectStore {
       settings: {
         language: defaultLanguage(locale),
         onboardingComplete: false,
-        alwaysOnTop: false,
-        clickThrough: true,
+        alwaysOnTop: true,
+        clickThrough: false,
         quality: 'balanced'
       }
     }

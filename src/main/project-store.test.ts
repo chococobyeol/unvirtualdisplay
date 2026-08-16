@@ -31,6 +31,9 @@ describe('ProjectStore', () => {
     expect(project.lighting.azimuth).toBe(30)
     expect(project.lighting.elevation).toBe(45)
     expect(store.settings.language).toBe('ko')
+    expect(store.settings.onboardingComplete).toBe(false)
+    expect(store.settings.alwaysOnTop).toBe(true)
+    expect(store.settings.clickThrough).toBe(false)
     expect((await store.listProjects()).map((entry) => entry.id)).toContain(project.id)
   })
 
