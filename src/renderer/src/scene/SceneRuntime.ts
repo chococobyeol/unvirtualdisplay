@@ -17,6 +17,7 @@ import type {
   TransformState
 } from '../../../shared/types'
 import { createDefaultDisplayTransform, DISPLAY_CASE_SELECTION_ID } from '../../../shared/types'
+import { cameraSettingsEqual } from '../../../shared/camera'
 
 interface SceneCallbacks {
   onSelect: (id: string | null) => void
@@ -396,14 +397,7 @@ export class SceneRuntime {
         fov: this.camera.fov
       }
       const saved = this.project?.camera
-      if (saved
-        && Math.abs(saved.position.x - camera.position.x) < 0.0001
-        && Math.abs(saved.position.y - camera.position.y) < 0.0001
-        && Math.abs(saved.position.z - camera.position.z) < 0.0001
-        && Math.abs(saved.target.x - camera.target.x) < 0.0001
-        && Math.abs(saved.target.y - camera.target.y) < 0.0001
-        && Math.abs(saved.target.z - camera.target.z) < 0.0001
-        && Math.abs(saved.fov - camera.fov) < 0.0001) return
+      if (saved && cameraSettingsEqual(saved, camera)) return
       this.callbacks.onCamera(camera)
     }
     this.controls.addEventListener('end', reportCamera)
@@ -505,13 +499,12 @@ export class SceneRuntime {
       this.displayRoot.updateMatrixWorld(true)
     }
 
-    if (isNewProject || this.variant === 'display') {
-      this.camera.position.copy(vector3(project.camera.position))
-      this.camera.fov = project.camera.fov
-      this.camera.updateProjectionMatrix()
-      this.controls.target.copy(vector3(project.camera.target))
-      this.controls.update()
+    const runtimeCamera = {
+      position: { x: this.camera.position.x, y: this.camera.position.y, z: this.camera.position.z },
+      target: { x: this.controls.target.x, y: this.controls.target.y, z: this.controls.target.z },
+      fov: this.camera.fov
     }
+    if (isNewProject || !cameraSettingsEqual(runtimeCamera, project.camera)) this.setCamera(project.camera)
 
     this.updateLighting(project)
     if (this.casePreset !== project.casePreset || (this.world && this.staticBodies.length === 0)) {
