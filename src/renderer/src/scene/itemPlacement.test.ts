@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
 import type { TransformState } from '../../../shared/types'
-import { findOpenImportPosition } from './itemPlacement'
+import { findOpenImportPosition, isPlacementBelowSafetyFloor, transformedItemBounds } from './itemPlacement'
 
 const transform: TransformState = {
   position: { x: 0, y: 0, z: 0 },
@@ -55,7 +55,32 @@ describe('findOpenImportPosition', () => {
 
     const position = findOpenImportPosition(itemBounds, transform, occupied)
 
-    expect(position.y).toBeCloseTo(0)
+    expect(position.y).toBeCloseTo(-0.18)
     expect(position.z).toBeGreaterThan(1.12)
+  })
+
+  it('includes the saved position when calculating rendered bounds', () => {
+    const placed = transformedItemBounds(itemBounds, {
+      ...transform,
+      position: { x: 1.2, y: 2.83, z: -0.4 },
+      scale: { x: 0.6, y: 0.6, z: 0.6 }
+    })
+
+    expect(placed.min.x).toBeCloseTo(0.75)
+    expect(placed.min.y).toBeCloseTo(2.83)
+    expect(placed.min.z).toBeCloseTo(-0.58)
+  })
+
+  it('marks an item visibly sunk below the catch floor for recovery', () => {
+    expect(isPlacementBelowSafetyFloor(itemBounds, {
+      ...transform,
+      position: { x: -1.29, y: -0.543, z: -0.08 },
+      scale: { x: 0.6, y: 0.6, z: 0.6 }
+    })).toBe(true)
+
+    expect(isPlacementBelowSafetyFloor(itemBounds, {
+      ...transform,
+      position: { x: 0, y: -0.18, z: 2 }
+    })).toBe(false)
   })
 })

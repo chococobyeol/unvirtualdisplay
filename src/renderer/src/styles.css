@@ -76,8 +76,9 @@ button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke
 .quiet-button:disabled { opacity: .25; cursor: default; }
 .quiet-button svg { width: 15px; height: 15px; flex: none; stroke-width: 1.9; }
 .quiet-button > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.item-list-section { flex: 1; }
-.item-list { max-height: 100%; }
+.item-list-section { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.item-list-section .section-heading { flex: none; }
+.item-list { flex: 1 1 auto; min-height: 0; max-height: none; overflow-x: hidden; overflow-y: auto; scrollbar-gutter: stable; padding-right: 2px; }
 .count-badge { min-width: 18px; height: 18px; padding: 0 5px; display: grid; place-items: center; background: rgba(255,255,255,.05); color: var(--muted); border-radius: 9px; font-size: 11px; }
 .item-row { width: 100%; border-radius: 6px; padding: 3px 4px 3px 6px; gap: 2px; }
 .item-row.case-row { padding: 3px 4px 3px 6px; gap: 2px; }

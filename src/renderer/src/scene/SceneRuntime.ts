@@ -18,7 +18,7 @@ import type {
 } from '../../../shared/types'
 import { createDefaultDisplayTransform, DISPLAY_CASE_SELECTION_ID } from '../../../shared/types'
 import { cameraSettingsEqual } from '../../../shared/camera'
-import { findOpenImportPosition } from './itemPlacement'
+import { findOpenImportPosition, isPlacementBelowSafetyFloor } from './itemPlacement'
 
 interface SceneCallbacks {
   onSelect: (id: string | null) => void
@@ -664,6 +664,12 @@ export class SceneRuntime {
           runtime.root.position.set(position.x, position.y, position.z)
           runtime.root.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w)
           if (isDraggedBody && this.dragTarget) runtime.root.scale.copy(this.dragTarget.scale)
+          if (!isDraggedBody && isPlacementBelowSafetyFloor(runtime.bounds, transformOf(runtime.root))) {
+            this.moveRuntimeToOpenPosition(runtime)
+            anyMoving = true
+            anyChanged = true
+            continue
+          }
           if (isDraggedBody && this.dragTarget && !this.isBodyOverlappingEnvironment(body)) {
             this.dragTarget.safePosition = runtime.root.position.clone()
             this.dragTarget.safeQuaternion = runtime.root.quaternion.clone()
@@ -841,7 +847,8 @@ export class SceneRuntime {
     }
 
     const placedItem = cloneItem(latest)
-    if (autoPlace) {
+    const requiresRecovery = isPlacementBelowSafetyFloor(loaded.bounds, placedItem.transform)
+    if (autoPlace || requiresRecovery) {
       const occupied = [...this.items.values()]
         .filter((runtime) => runtime.snapshot.visible !== false)
         .map((runtime) => {
@@ -858,7 +865,7 @@ export class SceneRuntime {
     this.itemLayer.add(loaded.root)
     this.items.set(item.id, loaded)
     this.syncRuntimeItem(loaded, placedItem, true)
-    if (autoPlace) this.callbacks.onTransform(item.id, placedItem.transform, false)
+    if (autoPlace || requiresRecovery) this.callbacks.onTransform(item.id, placedItem.transform, false)
     if (this.selectedId === item.id) this.setSelection(item.id)
     this.settlementReported = false
   }
@@ -1229,9 +1236,51 @@ export class SceneRuntime {
       convexHullApproximation: true
     }) ?? RAPIER.ColliderDesc.convexHull(vertexArray)
     if (!detailed) return null
-    runtime.colliderShape = detailed.shape
+
+    // Triangle downsampling can miss a character's lowest vertices. A compact
+    // support pad reaches the visual bounds' true bottom, so the model cannot
+    // appear buried in a shelf while its sampled collider rests above it.
+    const size = runtime.bounds.getSize(new THREE.Vector3())
+    const center = runtime.bounds.getCenter(new THREE.Vector3())
+    const supportHalfHeight = 0.025
+    const scaledBottom = Math.min(runtime.bounds.min.y * scale.y, runtime.bounds.max.y * scale.y)
+    const support = new RAPIER.Cuboid(
+      Math.max(0.04, Math.min(0.34, Math.abs(size.x * scale.x) * 0.22)),
+      supportHalfHeight,
+      Math.max(0.04, Math.min(0.28, Math.abs(size.z * scale.z) * 0.22))
+    )
+    const identity = { x: 0, y: 0, z: 0, w: 1 }
+    const detailedShape = detailed.shape
+    const shapes = detailedShape instanceof RAPIER.Compound ? [...detailedShape.shapes, support] : [detailedShape, support]
+    const positions = detailedShape instanceof RAPIER.Compound
+      ? [...detailedShape.positions, { x: center.x * scale.x, y: scaledBottom + supportHalfHeight, z: center.z * scale.z }]
+      : [{ x: 0, y: 0, z: 0 }, { x: center.x * scale.x, y: scaledBottom + supportHalfHeight, z: center.z * scale.z }]
+    const rotations = detailedShape instanceof RAPIER.Compound
+      ? [...detailedShape.rotations, identity]
+      : [identity, identity]
+    const supported = RAPIER.ColliderDesc.compound(shapes, positions, rotations)
+    runtime.colliderShape = supported.shape
     runtime.colliderScaleKey = scaleKey
-    return detailed
+    return supported
+  }
+
+  private moveRuntimeToOpenPosition(runtime: RuntimeItem): void {
+    const transform = transformOf(runtime.root)
+    const occupied = [...this.items.values()]
+      .filter((candidate) => candidate !== runtime && candidate.snapshot.visible !== false)
+      .map((candidate) => {
+        candidate.root.updateMatrix()
+        return candidate.bounds.clone().applyMatrix4(candidate.root.matrix)
+      })
+    const position = findOpenImportPosition(runtime.bounds, transform, occupied)
+    runtime.root.position.copy(position)
+    transform.position = { x: position.x, y: position.y, z: position.z }
+    runtime.snapshot.transform = structuredClone(transform)
+    const localItem = this.project?.items.find((candidate) => candidate.id === runtime.id)
+    if (localItem) localItem.transform = structuredClone(transform)
+    this.rebuildPhysics(runtime)
+    this.callbacks.onTransform(runtime.id, transform, false)
+    this.settlementReported = false
   }
 
   private createBoundsCollider(runtime: RuntimeItem, item: DisplayItem): RAPIER.ColliderDesc {
