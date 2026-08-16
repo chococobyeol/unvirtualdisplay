@@ -606,6 +606,11 @@ export function EditorApp(): React.JSX.Element | null {
   const selectedItem = useMemo(() => project?.items.find((item) => item.id === selectedId) ?? null, [project, selectedId])
   useEffect(() => {
     const handleKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setSelected(null)
+        return
+      }
       const target = event.target as HTMLElement | null
       if (target?.matches('input, select, textarea')) return
       const command = event.metaKey || event.ctrlKey
