@@ -17,7 +17,7 @@ import type {
   TransformState
 } from '../../../shared/types'
 import { createDefaultDisplayTransform, DISPLAY_CASE_SELECTION_ID } from '../../../shared/types'
-import { cameraSettingsEqual } from '../../../shared/camera'
+import { cameraSettingsEqual, shouldApplySyncedCamera } from '../../../shared/camera'
 import { findOpenImportPosition, isPlacementBelowSafetyFloor } from './itemPlacement'
 import { hitsVisibleTransformHandle, pickSceneSelection } from './sceneSelection'
 
@@ -347,6 +347,7 @@ export class SceneRuntime {
   private disposed = false
   private applyingCamera = false
   private cameraPreviewFrame = 0
+  private cameraInteractionActive = false
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -393,15 +394,9 @@ export class SceneRuntime {
     this.controls.mouseButtons.MIDDLE = THREE.MOUSE.ROTATE
     this.controls.mouseButtons.RIGHT = THREE.MOUSE.ROTATE
     this.controls.target.set(0, 1.35, 0)
-    const reportCamera = (): void => {
-      this.flushCameraPreview()
-      const camera = this.getCameraSettings()
-      const saved = this.project?.camera
-      if (saved && cameraSettingsEqual(saved, camera)) return
-      this.callbacks.onCamera(camera)
-    }
+    this.controls.addEventListener('start', this.beginCameraInteraction)
     this.controls.addEventListener('change', this.queueCameraPreview)
-    this.controls.addEventListener('end', reportCamera)
+    this.controls.addEventListener('end', this.reportCamera)
 
     const viewportGizmo = variant === 'editor'
       ? new ViewportGizmo(this.camera, this.renderer, {
@@ -453,8 +448,9 @@ export class SceneRuntime {
       viewportGizmo.attachControls(this.controls)
     }
     this.viewportGizmo = viewportGizmo
+    this.viewportGizmo?.addEventListener('start', this.beginCameraInteraction)
     this.viewportGizmo?.addEventListener('change', this.queueCameraPreview)
-    this.viewportGizmo?.addEventListener('end', reportCamera)
+    this.viewportGizmo?.addEventListener('end', this.reportCamera)
 
     this.transformControls = variant === 'editor' ? new TransformControls(this.camera, canvas) : null
     if (this.transformControls) {
@@ -509,7 +505,9 @@ export class SceneRuntime {
       target: { x: this.controls.target.x, y: this.controls.target.y, z: this.controls.target.z },
       fov: this.camera.fov
     }
-    if (isNewProject || !cameraSettingsEqual(runtimeCamera, project.camera)) this.setCamera(project.camera)
+    if (isNewProject || shouldApplySyncedCamera(runtimeCamera, project.camera, this.cameraInteractionActive)) {
+      this.setCamera(project.camera)
+    }
 
     this.updateLighting(project)
     if (this.casePreset !== project.casePreset || (this.world && this.staticBodies.length === 0)) {
@@ -582,6 +580,19 @@ export class SceneRuntime {
     }
   }
 
+  private beginCameraInteraction = (): void => {
+    this.cameraInteractionActive = true
+  }
+
+  private reportCamera = (): void => {
+    this.cameraInteractionActive = false
+    this.flushCameraPreview()
+    const camera = this.getCameraSettings()
+    const saved = this.project?.camera
+    if (saved && cameraSettingsEqual(saved, camera)) return
+    this.callbacks.onCamera(camera)
+  }
+
   private queueCameraPreview = (): void => {
     if (this.applyingCamera || this.disposed || this.cameraPreviewFrame) return
     this.cameraPreviewFrame = requestAnimationFrame(() => {
@@ -607,6 +618,11 @@ export class SceneRuntime {
     } finally {
       this.applyingCamera = false
     }
+  }
+
+  syncCamera(camera: CameraSettings): void {
+    if (!shouldApplySyncedCamera(this.getCameraSettings(), camera, this.cameraInteractionActive)) return
+    this.setCamera(camera)
   }
 
   capture(): Promise<Blob | null> {

@@ -11,3 +11,11 @@ export function cameraSettingsEqual(left: CameraSettings, right: CameraSettings)
     && Math.abs(left.target.z - right.target.z) < CAMERA_EPSILON
     && Math.abs(left.fov - right.fov) < CAMERA_EPSILON
 }
+
+export function shouldApplySyncedCamera(
+  current: CameraSettings,
+  incoming: CameraSettings,
+  interactionActive: boolean
+): boolean {
+  return !interactionActive && !cameraSettingsEqual(current, incoming)
+}

@@ -56,7 +56,7 @@ export const SceneView = forwardRef<SceneViewHandle, SceneViewProps>(function Sc
 
   useEffect(() => { void runtimeRef.current?.syncProject(project) }, [project])
   useEffect(() => window.unvirtual.onCameraPreview(({ projectId, camera }) => {
-    if (projectId === projectRef.current.id) runtimeRef.current?.setCamera(camera)
+    if (projectId === projectRef.current.id) runtimeRef.current?.syncCamera(camera)
   }), [])
   useEffect(() => runtimeRef.current?.setSelection(selectedItemId), [selectedItemId])
   useEffect(() => runtimeRef.current?.setTransformMode(transformMode), [transformMode])

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cameraSettingsEqual } from './camera'
+import { cameraSettingsEqual, shouldApplySyncedCamera } from './camera'
 import { createDefaultCameraSettings } from './types'
 
 describe('cameraSettingsEqual', () => {
@@ -21,5 +21,26 @@ describe('cameraSettingsEqual', () => {
     const incoming = structuredClone(current)
     incoming.position.z -= 1
     expect(cameraSettingsEqual(current, incoming)).toBe(false)
+  })
+})
+
+describe('shouldApplySyncedCamera', () => {
+  it('applies an incoming camera while idle', () => {
+    const current = createDefaultCameraSettings()
+    const incoming = structuredClone(current)
+    incoming.position.x += 1
+    expect(shouldApplySyncedCamera(current, incoming, false)).toBe(true)
+  })
+
+  it('does not restore a stale saved camera during a local interaction', () => {
+    const saved = createDefaultCameraSettings()
+    const locallyDragged = structuredClone(saved)
+    locallyDragged.position.x += 1
+    expect(shouldApplySyncedCamera(locallyDragged, saved, true)).toBe(false)
+  })
+
+  it('does not reapply an unchanged camera', () => {
+    const current = createDefaultCameraSettings()
+    expect(shouldApplySyncedCamera(current, structuredClone(current), false)).toBe(false)
   })
 })
