@@ -41,6 +41,9 @@ import type {
   Vec3
 } from '../../../shared/types'
 import { createDefaultCameraSettings, DISPLAY_CASE_SELECTION_ID } from '../../../shared/types'
+import galleryCasePreview from '../assets/case-previews/gallery.jpg'
+import glassCasePreview from '../assets/case-previews/glass.jpg'
+import warmCasePreview from '../assets/case-previews/warm.jpg'
 import { reorderById, type ReorderPlacement } from '../reorder'
 import { useAppStore } from '../store'
 import { SceneView, type SceneViewHandle } from './SceneView'
@@ -207,6 +210,112 @@ function DisplayFileMenu(): React.JSX.Element {
           setOpen(false)
           void backup()
         }}><Icon name="backup" /><span>{t('exportDisplayArchive')}</span></button>
+      </div>}
+    </div>
+  )
+}
+
+const CASE_PREVIEW_IMAGES: Record<CasePreset, string> = {
+  gallery: galleryCasePreview,
+  glass: glassCasePreview,
+  warm: warmCasePreview
+}
+
+function CasePresetPreview({ preset }: { preset: CasePreset }): React.JSX.Element {
+  return <img className="case-preset-preview" src={CASE_PREVIEW_IMAGES[preset]} alt="" draggable={false} aria-hidden="true" />
+}
+
+function CasePresetControl({
+  value,
+  label,
+  getName,
+  onChange
+}: {
+  value: CasePreset
+  label: string
+  getName: (preset: CasePreset) => string
+  onChange: (preset: CasePreset) => void
+}): React.JSX.Element {
+  const [open, setOpen] = useState(false)
+  const controlRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const popoverRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const dismiss = (event: PointerEvent): void => {
+      if (!controlRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    const closeFromKeyboard = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      setOpen(false)
+      window.requestAnimationFrame(() => triggerRef.current?.focus())
+    }
+    window.addEventListener('pointerdown', dismiss)
+    window.addEventListener('keydown', closeFromKeyboard)
+    const focusFrame = window.requestAnimationFrame(() => {
+      popoverRef.current?.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus()
+    })
+    return () => {
+      window.cancelAnimationFrame(focusFrame)
+      window.removeEventListener('pointerdown', dismiss)
+      window.removeEventListener('keydown', closeFromKeyboard)
+    }
+  }, [open])
+
+  const moveFocus = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return
+    const cards = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('.case-preset-card'))
+    if (!cards.length) return
+    event.preventDefault()
+    const current = Math.max(0, cards.indexOf(document.activeElement as HTMLButtonElement))
+    const offset = event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1
+    const next = event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? cards.length - 1
+        : (current + offset + cards.length) % cards.length
+    cards[next]?.focus()
+  }
+
+  return (
+    <div className="case-picker" ref={controlRef}>
+      <span className="case-picker-label">{label}</span>
+      <button
+        ref={triggerRef}
+        type="button"
+        className={`case-picker-trigger${open ? ' open' : ''}`}
+        title={getName(value)}
+        aria-label={`${label}: ${getName(value)}`}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span>{getName(value)}</span>
+        <ChevronDown aria-hidden="true" />
+      </button>
+      {open && <div className="case-picker-popover" ref={popoverRef}>
+        <strong>{label}</strong>
+        <div className="case-picker-grid" role="listbox" aria-label={label} onKeyDown={moveFocus}>
+          {CASES.map((preset) => <button
+            key={preset}
+            type="button"
+            className="case-preset-card"
+            role="option"
+            aria-selected={value === preset}
+            title={getName(preset)}
+            onClick={() => {
+              if (preset !== value) onChange(preset)
+              setOpen(false)
+              window.requestAnimationFrame(() => triggerRef.current?.focus())
+            }}
+          >
+            <CasePresetPreview preset={preset} />
+            <span>{getName(preset)}</span>
+          </button>)}
+        </div>
       </div>}
     </div>
   )
@@ -1054,7 +1163,7 @@ export function EditorApp(): React.JSX.Element | null {
   useEffect(() => {
     const handleKey = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') {
-        if (document.querySelector('[role="menu"]')) return
+        if (document.querySelector('[role="menu"], [role="listbox"]')) return
         event.preventDefault()
         if (settingsOpen) {
           setSettingsOpen(false)
@@ -1112,10 +1221,12 @@ export function EditorApp(): React.JSX.Element | null {
             <button className="icon-button" disabled={!future.length} title={t('redo')} onClick={redo}><Icon name="redo" /></button>
           </div>
           <DisplayFileMenu />
-          <div className="case-switcher">
-            <span>{t('displayCase')}</span>
-            {CASES.map((preset) => <button key={preset} title={t(preset)} className={project.casePreset === preset ? 'active' : ''} onClick={() => changeCase(preset)}>{t(`${preset}Short`)}</button>)}
-          </div>
+          <CasePresetControl
+            value={project.casePreset}
+            label={t('displayCase')}
+            getName={(preset) => t(preset)}
+            onChange={changeCase}
+          />
           <span className={`save-status ${saveStatus}`}>{saveStatus === 'saving' ? t('saving') : t('saved')}</span>
           <button
             type="button"
