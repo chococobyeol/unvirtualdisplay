@@ -6,6 +6,12 @@ const MIN_HEIGHT = 240
 const MAX_INITIAL_WIDTH = 420
 const INITIAL_ASPECT_RATIO = 4 / 3
 
+function intersectionArea(left: Rectangle, right: Rectangle): number {
+  const width = Math.max(0, Math.min(left.x + left.width, right.x + right.width) - Math.max(left.x, right.x))
+  const height = Math.max(0, Math.min(left.y + left.height, right.y + right.height) - Math.max(left.y, right.y))
+  return width * height
+}
+
 export function getDefaultDisplayBounds(workArea: Rectangle): Rectangle {
   const margin = workArea.width >= MIN_WIDTH + EDGE_MARGIN * 2
     && workArea.height >= MIN_HEIGHT + EDGE_MARGIN * 2
@@ -23,4 +29,14 @@ export function getDefaultDisplayBounds(workArea: Rectangle): Rectangle {
     width,
     height
   }
+}
+
+export function recoverDisplayBounds(
+  savedBounds: Rectangle | undefined,
+  workAreas: readonly Rectangle[],
+  primaryWorkArea: Rectangle
+): Rectangle {
+  if (!savedBounds) return getDefaultDisplayBounds(primaryWorkArea)
+  if (workAreas.some((workArea) => intersectionArea(savedBounds, workArea) > 0)) return savedBounds
+  return getDefaultDisplayBounds(primaryWorkArea)
 }

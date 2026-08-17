@@ -1,26 +1,32 @@
 import { randomUUID } from 'node:crypto'
 import { copyFile, cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
-import { basename, extname, join, relative, sep } from 'node:path'
+import { basename, dirname, extname, join, relative, sep } from 'node:path'
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
+import { planAssetImports } from './asset-import'
 import type {
   AppSettings,
   DisplayProject,
   ImportedAsset,
   Language,
+  ProjectChanges,
   ProjectEvent,
+  ProjectPatchEvent,
   ProjectResetScope,
   ProjectSummary
 } from '../shared/types'
-import { createDefaultCameraSettings, createDefaultDisplayTransform, createDefaultLightingSettings, normalizeCasePreset } from '../shared/types'
+import {
+  createDefaultCameraSettings,
+  createDefaultDisplayTransform,
+  createDefaultLightingSettings,
+  normalizeCasePreset,
+  PROJECT_CHANGE_KEYS
+} from '../shared/types'
 
 interface StoreIndex {
   activeProjectId: string
   projectOrder: string[]
   settings: AppSettings
 }
-
-const MODEL_EXTENSIONS = new Set(['glb', 'gltf', 'vrm', 'fbx', 'obj'])
-const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp'])
 
 function now(): string {
   return new Date().toISOString()
@@ -96,6 +102,16 @@ function normalizeProject(project: DisplayProject): DisplayProject {
   }
 }
 
+function sanitizedProjectChanges(changes: ProjectChanges): ProjectChanges {
+  const sanitized: ProjectChanges = {}
+  for (const key of PROJECT_CHANGE_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(changes, key)) {
+      Object.assign(sanitized, { [key]: structuredClone(changes[key]) })
+    }
+  }
+  return sanitized
+}
+
 function summarize(project: DisplayProject): ProjectSummary {
   return {
     id: project.id,
@@ -125,6 +141,8 @@ export class ProjectStore {
   private readonly projectsRoot: string
   private readonly indexPath: string
   private readonly projectQueues = new Map<string, Promise<void>>()
+  private readonly pendingAssetGroups = new Map<string, Set<string>>()
+  private indexQueue: Promise<void> = Promise.resolve()
   private index: StoreIndex
 
   constructor(userDataPath: string, locale: string) {
@@ -139,7 +157,8 @@ export class ProjectStore {
         onboardingComplete: false,
         alwaysOnTop: true,
         clickThrough: false,
-        quality: 'balanced'
+        quality: 'balanced',
+        displayVisible: true
       }
     }
   }
@@ -170,6 +189,9 @@ export class ProjectStore {
     }
 
     this.index.projectOrder = (await this.listProjects()).map((project) => project.id)
+    for (const project of await this.listProjects()) {
+      await this.pruneOrphanAssets(await this.loadProject(project.id))
+    }
     await this.saveIndex()
   }
 
@@ -236,7 +258,34 @@ export class ProjectStore {
         updatedAt: now()
       }
       await this.writeProject(saved)
+      this.markReferencedAssetGroups(saved)
+      await this.pruneOrphanAssets(saved)
       return this.event(saved)
+    })
+  }
+
+  async updateProject(projectId: string, changes: ProjectChanges): Promise<ProjectPatchEvent> {
+    this.assertProjectId(projectId)
+    return this.serializeProject(projectId, async () => {
+      const safeChanges = sanitizedProjectChanges(changes)
+      const current = await this.loadProject(projectId)
+      if (Object.keys(safeChanges).length === 0) {
+        return { ...await this.event(current), changes: safeChanges }
+      }
+
+      const updated = normalizeProject({
+        ...current,
+        ...safeChanges,
+        id: current.id,
+        schemaVersion: current.schemaVersion,
+        revision: current.revision + 1,
+        createdAt: current.createdAt,
+        updatedAt: now()
+      })
+      await this.writeProject(updated)
+      this.markReferencedAssetGroups(updated)
+      await this.pruneOrphanAssets(updated)
+      return { ...await this.event(updated), changes: safeChanges }
     })
   }
 
@@ -261,14 +310,13 @@ export class ProjectStore {
           updatedAt: now()
         }
 
-      if (scope === 'items') {
-        const itemGroups = new Set(current.items.map((item) => item.relativePath.split('/')[0]).filter(Boolean))
-        await Promise.all([...itemGroups].map((group) => rm(this.resolveAssetPath(projectId, group), { recursive: true, force: true })))
-      } else {
+      if (scope !== 'items') {
+        this.pendingAssetGroups.delete(projectId)
         await rm(this.assetFolder(projectId), { recursive: true, force: true })
         await mkdir(this.assetFolder(projectId), { recursive: true })
       }
       await this.writeProject(updated)
+      await this.pruneOrphanAssets(updated)
       return this.event(updated)
     })
   }
@@ -276,6 +324,7 @@ export class ProjectStore {
   async resetData(): Promise<ProjectEvent> {
     await Promise.all([...this.projectQueues.values()])
     this.projectQueues.clear()
+    this.pendingAssetGroups.clear()
     await rm(this.projectsRoot, { recursive: true, force: true })
     await mkdir(this.projectsRoot, { recursive: true })
     this.index.projectOrder = []
@@ -292,6 +341,7 @@ export class ProjectStore {
 
   async duplicateProject(projectId: string): Promise<ProjectEvent> {
     const source = await this.loadProject(projectId)
+    await this.pruneOrphanAssets(source)
     const copy = structuredClone(source)
     copy.id = randomUUID()
     copy.name = `${source.name} copy`
@@ -362,37 +412,41 @@ export class ProjectStore {
   async importFiles(projectId: string, paths: string[]): Promise<ImportedAsset[]> {
     this.assertProjectId(projectId)
     await this.loadProject(projectId)
-    const files = paths.filter((path) => {
-      const extension = extname(path).slice(1).toLowerCase()
-      return MODEL_EXTENSIONS.has(extension) || IMAGE_EXTENSIONS.has(extension) || ['bin', 'mtl'].includes(extension)
-    })
-    if (files.length === 0) return []
+    const plans = await planAssetImports(paths)
+    const assets: ImportedAsset[] = []
 
-    const groupId = randomUUID()
-    const groupFolder = join(this.assetFolder(projectId), groupId)
-    await mkdir(groupFolder, { recursive: true })
+    for (const plan of plans) {
+      const groupId = randomUUID()
+      const pending = this.pendingAssetGroups.get(projectId) ?? new Set<string>()
+      pending.add(groupId)
+      this.pendingAssetGroups.set(projectId, pending)
+      try {
+        for (const file of plan.files) {
+          const destination = this.resolveAssetPath(projectId, `${groupId}/${file.relativePath}`)
+          await mkdir(dirname(destination), { recursive: true })
+          await copyFile(file.sourcePath, destination)
+        }
+      } catch (error) {
+        pending.delete(groupId)
+        await rm(this.resolveAssetPath(projectId, groupId), { recursive: true, force: true })
+        throw error
+      }
 
-    for (const source of files) {
-      await copyFile(source, join(groupFolder, basename(source)))
-    }
-
-    return files.flatMap((source) => {
-      const extension = extname(source).slice(1).toLowerCase()
-      const kind = MODEL_EXTENSIONS.has(extension) ? 'model' : IMAGE_EXTENSIONS.has(extension) ? 'image' : null
-      if (!kind) return []
-      const relativePath = `${groupId}/${basename(source)}`
-      return [{
-        name: basename(source, extname(source)),
-        extension,
-        kind,
+      const relativePath = `${groupId}/${plan.entryRelativePath}`
+      assets.push({
+        name: basename(plan.sourcePath, extname(plan.sourcePath)),
+        extension: plan.extension,
+        kind: plan.kind,
         relativePath,
         assetUrl: this.assetUrl(projectId, relativePath)
-      } satisfies ImportedAsset]
-    })
+      })
+    }
+    return assets
   }
 
   async exportProjectArchive(projectId: string): Promise<Uint8Array> {
     const project = await this.loadProject(projectId)
+    await this.pruneOrphanAssets(project)
     const entries: Record<string, Uint8Array> = {
       'project.json': strToU8(JSON.stringify(project, null, 2))
     }
@@ -435,6 +489,7 @@ export class ProjectStore {
     }
 
     await this.writeProject(imported)
+    await this.pruneOrphanAssets(imported)
     this.index.activeProjectId = imported.id
     this.index.projectOrder = [imported.id, ...this.index.projectOrder.filter((projectId) => projectId !== imported.id)]
     await this.saveIndex()
@@ -487,9 +542,39 @@ export class ProjectStore {
     }
   }
 
+  private referencedAssetGroups(project: DisplayProject): Set<string> {
+    const paths = [
+      ...project.items.map((item) => item.relativePath),
+      project.background.relativePath ?? ''
+    ]
+    return new Set(paths.map((path) => path.split('/')[0]).filter(Boolean))
+  }
+
+  private markReferencedAssetGroups(project: DisplayProject): void {
+    const pending = this.pendingAssetGroups.get(project.id)
+    if (!pending) return
+    for (const group of this.referencedAssetGroups(project)) pending.delete(group)
+    if (pending.size === 0) this.pendingAssetGroups.delete(project.id)
+  }
+
+  private async pruneOrphanAssets(project: DisplayProject): Promise<void> {
+    const folder = this.assetFolder(project.id)
+    if (!(await pathExists(folder))) return
+    const keep = this.referencedAssetGroups(project)
+    for (const pending of this.pendingAssetGroups.get(project.id) ?? []) keep.add(pending)
+    const children = await readdir(folder, { withFileTypes: true })
+    await Promise.all(children
+      .filter((child) => child.isDirectory() && !keep.has(child.name))
+      .map((child) => rm(join(folder, child.name), { recursive: true, force: true })))
+  }
+
   private async saveIndex(): Promise<void> {
-    await mkdir(this.root, { recursive: true })
-    await writeJsonAtomic(this.indexPath, this.index)
+    const operation = this.indexQueue.catch(() => undefined).then(async () => {
+      await mkdir(this.root, { recursive: true })
+      await writeJsonAtomic(this.indexPath, this.index)
+    })
+    this.indexQueue = operation
+    await operation
   }
 
   private projectFolder(projectId: string): string {

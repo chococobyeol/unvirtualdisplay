@@ -11,6 +11,13 @@ const categoryKeys = {
 } as const
 
 describe('object catalog copy', () => {
+  it('keeps every UI translation key available in all supported languages', () => {
+    const koreanKeys = Object.keys(resources.ko.translation).sort()
+    for (const locale of Object.keys(resources) as (keyof typeof resources)[]) {
+      expect(Object.keys(resources[locale].translation).sort(), locale).toEqual(koreanKeys)
+    }
+  })
+
   it('has names, factual descriptions, and category labels in every supported language', () => {
     for (const locale of Object.keys(resources) as (keyof typeof resources)[]) {
       const translation = resources[locale].translation as Record<string, string>

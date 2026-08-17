@@ -88,6 +88,7 @@ export interface DisplayItem {
   assetUrl: string
   relativePath: string
   visible?: boolean
+  selectionPassThrough?: boolean
   imageDisplayType?: ImageDisplayType
   acrylicShape?: AcrylicShape
   acrylicOffset?: number
@@ -158,6 +159,26 @@ export interface DisplayProject {
   updatedAt: string
 }
 
+export const PROJECT_CHANGE_KEYS = [
+  'name',
+  'casePreset',
+  'caseVisible',
+  'displayTransform',
+  'items',
+  'camera',
+  'lighting',
+  'background'
+] as const
+export type ProjectChangeKey = typeof PROJECT_CHANGE_KEYS[number]
+export type ProjectChanges = Partial<Pick<DisplayProject, ProjectChangeKey>>
+
+export interface ProjectPatch {
+  projectId: string
+  revision: number
+  updatedAt: string
+  changes: ProjectChanges
+}
+
 export interface ProjectSummary {
   id: string
   name: string
@@ -171,6 +192,7 @@ export interface AppSettings {
   alwaysOnTop: boolean
   clickThrough: boolean
   quality: QualityPreset
+  displayVisible: boolean
   displayBounds?: { x: number; y: number; width: number; height: number }
 }
 
@@ -197,6 +219,10 @@ export interface ProjectEvent {
   activeProjectId: string
 }
 
+export interface ProjectPatchEvent extends ProjectEvent {
+  changes: ProjectChanges
+}
+
 export interface CameraPreviewEvent {
   projectId: string
   camera: CameraSettings
@@ -216,9 +242,10 @@ export interface UnvirtualApi {
   reorderProjects: (projectIds: string[]) => Promise<ProjectEvent>
   activateProject: (projectId: string) => Promise<ProjectEvent>
   saveProject: (project: DisplayProject) => Promise<ProjectEvent>
+  updateProject: (patch: ProjectPatch) => Promise<ProjectPatchEvent>
   resetProject: (projectId: string, scope: ProjectResetScope) => Promise<ProjectEvent>
   resetData: () => Promise<ProjectEvent>
-  previewProject: (project: DisplayProject) => void
+  previewProject: (patch: ProjectPatch) => void
   previewCamera: (preview: CameraPreviewEvent) => void
   exportProject: (projectId: string) => Promise<boolean>
   importProjectArchive: () => Promise<ProjectEvent | null>
@@ -231,6 +258,7 @@ export interface UnvirtualApi {
   exportDiagnostics: () => Promise<boolean>
   setDisplayVisible: (visible: boolean) => Promise<boolean>
   setDisplayEditing: (editing: boolean) => Promise<void>
+  resetDisplayBounds: () => Promise<void>
   showDisplayContextMenu: () => void
   setDisplayPointerIgnored: (ignored: boolean) => void
   startDisplayResize: (edge: DisplayResizeEdge, point: { x: number; y: number }) => void
@@ -242,7 +270,8 @@ export interface UnvirtualApi {
   onDisplayVisibilityChanged: (listener: (visible: boolean) => void) => () => void
   onDisplayEditingChanged: (listener: (editing: boolean) => void) => () => void
   onProjectChanged: (listener: (event: ProjectEvent) => void) => () => void
-  onProjectPreview: (listener: (project: DisplayProject) => void) => () => void
+  onProjectPatched: (listener: (event: ProjectPatchEvent) => void) => () => void
+  onProjectPreview: (listener: (patch: ProjectPatch) => void) => () => void
   onCameraPreview: (listener: (preview: CameraPreviewEvent) => void) => () => void
   onSettingsChanged: (listener: (event: SettingsEvent) => void) => () => void
 }

@@ -3,7 +3,11 @@ import { VRMLoaderPlugin, VRMUtils, type VRM } from '@pixiv/three-vrm'
 import * as THREE from 'three'
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js'
 import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
+import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js'
+import { MTLLoader } from 'three/examples/jsm/loaders/MTLLoader.js'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
 import { ViewportGizmo } from 'three-viewport-gizmo'
@@ -22,16 +26,31 @@ import { findOpenFloorPosition, findOpenImportPosition, fitImportedItemScale, is
 import { getCaseLayout } from './caseLayout'
 import { createBuiltInObject, createDisplayCaseObject, type ColliderBox } from './builtInObjects'
 import { createClearAcrylicMaterial } from './acrylicMaterial'
-import { acrylicStandBaseDimensions } from './acrylicStand'
+import {
+  acrylicOffsetPixelRadius,
+  acrylicStandBaseDimensions,
+  clampAcrylicOffset,
+  DEFAULT_ACRYLIC_OFFSET
+} from './acrylicStand'
+import {
+  alphaMaskToCollisionLayout,
+  createAcrylicColliderDesc,
+  createAcrylicColliderGeometry,
+  type AcrylicColliderGeometry
+} from './imageAcrylicCollider'
 import {
   addBuiltInItemColliders,
+  bodyCanSyncSettledTransform,
+  bodyNeedsRebuild,
   bodyOverlapsCollisionScene,
   configureItemRigidBody,
   createItemRigidBodyDescriptor,
   environmentCollisionGroups,
   findNearestClearBodyPosition,
-  itemCollisionGroups
+  itemCollisionGroups,
+  resolveRestoredBodyOverlaps
 } from './physicsPolicy'
+import { isPhysicsSceneHydrated, restoredItemSupportPriority } from './sceneHydration'
 import { pickSceneSelection, transformAxisAtPointer } from './sceneSelection'
 
 interface SceneCallbacks {
@@ -39,6 +58,7 @@ interface SceneCallbacks {
   onTransform: (id: string, transform: TransformState, remember?: boolean) => void
   onCameraPreview: (camera: CameraSettings) => void
   onCamera: (camera: CameraSettings) => void
+  onAssetError: (id: string, error: string | null) => void
 }
 
 interface RuntimeItem {
@@ -46,11 +66,14 @@ interface RuntimeItem {
   root: THREE.Group
   bounds: THREE.Box3
   body: RAPIER.RigidBody | null
+  bodyWorldGeneration: number
   mixer: THREE.AnimationMixer | null
   clips: THREE.AnimationClip[]
   vrm: VRM | null
   snapshot: DisplayItem
+  loadWarning?: string
   builtinColliders?: readonly ColliderBox[]
+  acrylicCollider?: AcrylicColliderGeometry
   colliderShape?: RAPIER.Shape
   colliderScaleKey?: string
 }
@@ -66,6 +89,8 @@ interface DragTarget {
 }
 
 let rapierInitialization: Promise<void> | null = null
+const MAX_CAMERA_DISTANCE = 30
+const RESTORED_PHYSICS_STABILIZATION_FRAMES = 90
 
 function initializeRapier(): Promise<void> {
   rapierInitialization ??= RAPIER.init()
@@ -242,6 +267,11 @@ function roundedColor(warmth: number): THREE.Color {
   return new THREE.Color().setHSL(0.095, 0.28, 0.92 + warmth * 0.025)
 }
 
+interface AcrylicCutout {
+  texture: THREE.CanvasTexture
+  colliderRects: ReturnType<typeof alphaMaskToCollisionLayout>['rectangles']
+}
+
 function createAcrylicCutoutTexture(
   source: CanvasImageSource,
   sourceWidth: number,
@@ -249,12 +279,12 @@ function createAcrylicCutoutTexture(
   panelWidth: number,
   panelHeight: number,
   offset: number
-): THREE.CanvasTexture {
+): AcrylicCutout {
   const scale = Math.min(1, 256 / Math.max(sourceWidth, sourceHeight))
   const sampleWidth = Math.max(1, Math.round(sourceWidth * scale))
   const sampleHeight = Math.max(1, Math.round(sourceHeight * scale))
   const density = Math.min(sampleWidth / panelWidth, sampleHeight / panelHeight)
-  const radius = Math.max(1, Math.min(48, Math.round(offset * density)))
+  const radius = acrylicOffsetPixelRadius(offset, density)
   const width = sampleWidth + radius * 2
   const height = sampleHeight + radius * 2
 
@@ -315,7 +345,10 @@ function createAcrylicCutoutTexture(
   texture.colorSpace = THREE.SRGBColorSpace
   texture.minFilter = THREE.LinearFilter
   texture.magFilter = THREE.LinearFilter
-  return texture
+  return {
+    texture,
+    colliderRects: alphaMaskToCollisionLayout(dilated, width, height).rectangles
+  }
 }
 
 export class SceneRuntime {
@@ -338,10 +371,10 @@ export class SceneRuntime {
   private readonly items = new Map<string, RuntimeItem>()
   private readonly pendingItemLoads = new Map<string, symbol>()
   private readonly staticBodies: RAPIER.RigidBody[] = []
-  private readonly gltfLoader = new GLTFLoader()
-  private readonly fbxLoader = new FBXLoader()
-  private readonly objLoader = new OBJLoader()
+  private readonly dracoLoader = new DRACOLoader()
+  private readonly ktx2Loader = new KTX2Loader()
   private world: RAPIER.World | null = null
+  private worldGeneration = 0
   private project: DisplayProject | null = null
   private animationFrame = 0
   private resizeObserver: ResizeObserver
@@ -350,9 +383,10 @@ export class SceneRuntime {
   private draggingTransform = false
   private activeTransformId: string | null = null
   private dragTarget: DragTarget | null = null
-  private settlementReported = true
   private casePreset: CasePreset | null = null
   private projectId: string | null = null
+  private restoringPhysicsProjectId: string | null = null
+  private physicsStabilizationFrames = 0
   private quality: QualityPreset
   private keyLight: THREE.SpotLight
   private fillLight: THREE.HemisphereLight
@@ -400,7 +434,7 @@ export class SceneRuntime {
     this.controls.enabled = true
     this.controls.enableDamping = false
     this.controls.minDistance = 2.3
-    this.controls.maxDistance = 12
+    this.controls.maxDistance = MAX_CAMERA_DISTANCE
     this.controls.maxPolarAngle = Math.PI
     this.controls.mouseButtons.LEFT = variant === 'editor' ? THREE.MOUSE.PAN : null
     this.controls.mouseButtons.MIDDLE = THREE.MOUSE.ROTATE
@@ -481,7 +515,7 @@ export class SceneRuntime {
     this.keyLight.shadow.mapSize.set(quality === 'high' ? 2048 : 1024, quality === 'high' ? 2048 : 1024)
     this.scene.add(this.fillLight, this.keyLight, this.keyLight.target)
 
-    this.gltfLoader.register((parser) => new VRMLoaderPlugin(parser))
+    this.ktx2Loader.detectSupport(this.renderer)
     // Capture selection before TransformControls. Otherwise the case gizmo's
     // broad invisible picker can swallow clicks on exhibits behind it.
     this.canvas.addEventListener('pointerdown', this.handlePointerDown, true)
@@ -494,6 +528,7 @@ export class SceneRuntime {
     await initializeRapier()
     if (this.disposed) return
     this.world = new RAPIER.World({ x: 0, y: -7.2, z: 0 })
+    this.worldGeneration += 1
     this.resize()
     this.animate()
   }
@@ -502,6 +537,10 @@ export class SceneRuntime {
     if (this.disposed) return
     const isNewProject = this.projectId !== project.id
     const previousItemIds = new Set(this.project?.items.map((item) => item.id) ?? [])
+    if (isNewProject) {
+      this.restoringPhysicsProjectId = project.id
+      this.physicsStabilizationFrames = 0
+    }
     this.project = structuredClone(project)
     this.projectId = project.id
 
@@ -680,6 +719,8 @@ export class SceneRuntime {
     for (const runtime of [...this.items.values()]) this.removeRuntimeItem(runtime)
     this.pendingItemLoads.clear()
     disposeObject(this.caseLayer)
+    this.dracoLoader.dispose()
+    this.ktx2Loader.dispose()
     this.renderer.dispose()
     this.world?.free()
     this.world = null
@@ -692,20 +733,37 @@ export class SceneRuntime {
     const delta = Math.min(this.timer.getDelta(), 1 / 20)
     this.controls.update()
 
-    if (this.world && this.variant === 'editor') {
+    const physicsSceneHydrated = isPhysicsSceneHydrated(
+      this.project?.items.map((item) => item.id) ?? [],
+      this.items.keys(),
+      this.pendingItemLoads.keys()
+    )
+    if (this.world && this.variant === 'editor' && physicsSceneHydrated) {
       this.world.timestep = Math.min(delta, 1 / 30)
+      for (const runtime of this.items.values()) {
+        if (
+          runtime.snapshot.visible !== false &&
+          bodyNeedsRebuild(this.world, runtime.body, runtime.bodyWorldGeneration, this.worldGeneration)
+        ) {
+          this.rebuildPhysics(runtime)
+        }
+      }
+      this.prepareRestoredPhysics()
+      const stabilizingRestoredScene = this.physicsStabilizationFrames > 0
       this.advanceDraggedBody(this.world.timestep)
       this.world.step()
-      let anyMoving = false
-      let anyChanged = false
 
       for (const runtime of this.items.values()) {
         const body = runtime.body
         if (!body) continue
         const isDraggedBody = this.draggingTransform && this.dragTarget?.id === runtime.id
         if (body.bodyType() === RAPIER.RigidBodyType.Dynamic || isDraggedBody) {
-          if (this.draggingTransform && body.bodyType() === RAPIER.RigidBodyType.Dynamic) {
-            this.limitPushedBodyVelocity(body)
+          if (body.bodyType() === RAPIER.RigidBodyType.Dynamic && (this.draggingTransform || stabilizingRestoredScene)) {
+            this.limitBodyVelocity(
+              body,
+              stabilizingRestoredScene ? 0.6 : 2.5,
+              stabilizingRestoredScene ? 1 : 4
+            )
           }
           const position = body.translation()
           const rotation = body.rotation()
@@ -714,30 +772,27 @@ export class SceneRuntime {
           if (isDraggedBody && this.dragTarget) runtime.root.scale.copy(this.dragTarget.scale)
           if (!isDraggedBody && isPlacementBelowSafetyFloor(runtime.bounds, transformOf(runtime.root))) {
             this.moveRuntimeToOpenPosition(runtime)
-            anyMoving = true
-            anyChanged = true
             continue
           }
-          if (body.bodyType() === RAPIER.RigidBodyType.Dynamic && !body.isSleeping()) anyMoving = true
-          if (transformsDiffer(transformOf(runtime.root), runtime.snapshot.transform)) anyChanged = true
-        }
-        runtime.mixer?.update(runtime.snapshot.animation.enabled ? delta * runtime.snapshot.animation.speed : 0)
-        runtime.vrm?.update(delta)
-      }
-
-
-      if (this.draggingTransform || anyMoving) {
-        this.settlementReported = false
-      } else if (anyChanged && !this.settlementReported) {
-        this.settlementReported = true
-        for (const runtime of this.items.values()) {
           const transform = transformOf(runtime.root)
-          if (transformsDiffer(transform, runtime.snapshot.transform)) {
+          if (
+            bodyCanSyncSettledTransform(
+              this.world,
+              body,
+              runtime.bodyWorldGeneration,
+              this.worldGeneration,
+              this.draggingTransform || isDraggedBody || stabilizingRestoredScene
+            ) &&
+            transformsDiffer(transform, runtime.snapshot.transform)
+          ) {
             runtime.snapshot.transform = transform
             this.callbacks.onTransform(runtime.id, transform, false)
           }
         }
+        runtime.mixer?.update(runtime.snapshot.animation.enabled ? delta * runtime.snapshot.animation.speed : 0)
+        runtime.vrm?.update(delta)
       }
+      if (stabilizingRestoredScene) this.physicsStabilizationFrames -= 1
     } else {
       for (const runtime of this.items.values()) {
         runtime.mixer?.update(runtime.snapshot.animation.enabled ? delta * runtime.snapshot.animation.speed : 0)
@@ -784,7 +839,7 @@ export class SceneRuntime {
     disposeObject(this.caseLayer)
     this.caseLayer.clear()
     if (this.world) {
-      for (const body of this.staticBodies.splice(0)) this.world.removeRigidBody(body)
+      for (const body of this.staticBodies.splice(0)) this.removePhysicsBody(body)
     }
 
     const builtCase = createDisplayCaseObject(preset)
@@ -803,7 +858,6 @@ export class SceneRuntime {
     // fall over an edge settle below the display instead of falling forever.
     this.addStaticCollider([24, 0.08, 24], [0, preset === 'custom' ? -0.08 : -0.26, 0])
     for (const runtime of this.items.values()) runtime.body?.wakeUp()
-    this.settlementReported = false
   }
 
   private addStaticCollider(halfExtents: [number, number, number], position: [number, number, number]): void {
@@ -814,10 +868,17 @@ export class SceneRuntime {
     this.staticBodies.push(body)
   }
 
+  private removePhysicsBody(body: RAPIER.RigidBody, bodyWorldGeneration = this.worldGeneration): void {
+    if (!this.world || bodyWorldGeneration !== this.worldGeneration) return
+    const currentBody = this.world.bodies.get(body.handle)
+    if (currentBody) this.world.removeRigidBody(currentBody)
+  }
+
   private async addItem(item: DisplayItem, autoPlace = false): Promise<void> {
     const loadToken = Symbol(item.id)
     this.pendingItemLoads.set(item.id, loadToken)
     let loaded: RuntimeItem | null = null
+    let loadError: string | null = null
     try {
       loaded = item.kind === 'builtin'
         ? this.createBuiltInItem(item)
@@ -826,6 +887,7 @@ export class SceneRuntime {
           : await this.createModelItem(item)
     } catch (error) {
       console.error(`Failed to load ${item.name}`, error)
+      loadError = error instanceof Error ? error.message : String(error)
       loaded = this.createErrorItem(item)
     }
 
@@ -851,6 +913,8 @@ export class SceneRuntime {
       return
     }
 
+    this.callbacks.onAssetError(item.id, loadError ?? loaded.loadWarning ?? null)
+
     const placedItem = cloneItem(latest)
     if (autoPlace && placedItem.kind !== 'builtin') placedItem.transform.scale = fitImportedItemScale(loaded.bounds, placedItem.transform)
     const requiresRecovery = isPlacementBelowSafetyFloor(loaded.bounds, placedItem.transform)
@@ -875,16 +939,28 @@ export class SceneRuntime {
     this.syncRuntimeItem(loaded, placedItem, true)
     if (autoPlace || requiresRecovery) this.callbacks.onTransform(item.id, placedItem.transform, false)
     if (this.selectedId === item.id) this.setSelection(item.id)
-    this.settlementReported = false
   }
 
   private async createModelItem(item: DisplayItem): Promise<RuntimeItem> {
     let content: THREE.Object3D
     let clips: THREE.AnimationClip[] = []
     let vrm: VRM | null = null
+    const resourceErrors = new Set<string>()
+    const manager = new THREE.LoadingManager()
+    manager.onError = (url) => {
+      resourceErrors.add(url)
+      if (this.items.has(item.id) && this.project?.items.some((candidate) => candidate.id === item.id && candidate.assetUrl === item.assetUrl)) {
+        this.callbacks.onAssetError(item.id, `Could not load linked resource: ${url}`)
+      }
+    }
 
     if (['glb', 'gltf', 'vrm'].includes(item.format)) {
-      const gltf = await this.gltfLoader.loadAsync(item.assetUrl) as GLTF
+      const loader = new GLTFLoader(manager)
+        .setDRACOLoader(this.dracoLoader)
+        .setKTX2Loader(this.ktx2Loader)
+        .setMeshoptDecoder(MeshoptDecoder)
+        .register((parser) => new VRMLoaderPlugin(parser))
+      const gltf = await loader.loadAsync(item.assetUrl) as GLTF
       vrm = (gltf.userData.vrm as VRM | undefined) ?? null
       if (vrm) {
         VRMUtils.removeUnnecessaryVertices(vrm.scene)
@@ -896,11 +972,11 @@ export class SceneRuntime {
       }
       clips = gltf.animations
     } else if (item.format === 'fbx') {
-      const fbx = await this.fbxLoader.loadAsync(item.assetUrl)
+      const fbx = await new FBXLoader(manager).loadAsync(item.assetUrl)
       content = fbx
       clips = fbx.animations
     } else {
-      content = await this.objLoader.loadAsync(item.assetUrl)
+      content = await this.loadObjWithMaterials(item.assetUrl, manager)
     }
 
     content.traverse((object) => {
@@ -929,7 +1005,36 @@ export class SceneRuntime {
 
     const bounds = new THREE.Box3().setFromObject(root)
     const mixer = clips.length > 0 ? new THREE.AnimationMixer(content) : null
-    return { id: item.id, root, bounds, body: null, mixer, clips, vrm, snapshot: cloneItem(item) }
+    return {
+      id: item.id,
+      root,
+      bounds,
+      body: null,
+      bodyWorldGeneration: 0,
+      mixer,
+      clips,
+      vrm,
+      snapshot: cloneItem(item),
+      loadWarning: resourceErrors.size > 0
+        ? `Could not load linked resource: ${[...resourceErrors][0]}`
+        : undefined
+    }
+  }
+
+  private async loadObjWithMaterials(assetUrl: string, manager: THREE.LoadingManager): Promise<THREE.Group> {
+    const response = await fetch(assetUrl)
+    if (!response.ok) throw new Error(`OBJ request failed (${response.status})`)
+    const source = await response.text()
+    const loader = new OBJLoader(manager)
+    const materialReference = source.split(/\r?\n/)
+      .map((line) => line.trim().match(/^mtllib\s+(.+)$/i)?.[1]?.trim())
+      .find((value): value is string => Boolean(value))
+    if (materialReference) {
+      const materials = await new MTLLoader(manager).loadAsync(new URL(materialReference, assetUrl).toString())
+      materials.preload()
+      loader.setMaterials(materials)
+    }
+    return loader.parse(source)
   }
 
   private createBuiltInItem(item: DisplayItem): RuntimeItem {
@@ -945,6 +1050,7 @@ export class SceneRuntime {
       root: built.root,
       bounds: built.bounds,
       body: null,
+      bodyWorldGeneration: 0,
       mixer: null,
       clips: [],
       vrm: null,
@@ -965,7 +1071,7 @@ export class SceneRuntime {
     const panelHeight = aspect > maximumWidth / maximumHeight ? maximumWidth / aspect : maximumHeight
     const root = new THREE.Group()
     const type = item.imageDisplayType ?? 'acrylic'
-    const acrylicOffset = Math.max(0.005, item.acrylicOffset ?? 0.045)
+    const acrylicOffset = clampAcrylicOffset(item.acrylicOffset ?? DEFAULT_ACRYLIC_OFFSET)
     const acrylicBase = acrylicStandBaseDimensions(panelWidth)
     const frameThickness = 0.075
     const frameOuterBottom = 0.02
@@ -1003,10 +1109,13 @@ export class SceneRuntime {
     })
     const dark = new THREE.MeshStandardMaterial({ color: 0x302c28, roughness: 0.55 })
     const cream = new THREE.MeshStandardMaterial({ color: 0xe2d8c9, roughness: 0.6 })
+    let acrylicCollider: AcrylicColliderGeometry | undefined
 
     if (type === 'acrylic') {
       const offset = acrylicOffset
       const shape = item.acrylicShape ?? 'contour'
+      let collisionShape = shape
+      let contourRects: AcrylicColliderGeometry['panel']['contourRects'] = []
       let backing: THREE.Mesh
       if (shape === 'rectangle') {
         backing = new THREE.Mesh(new THREE.BoxGeometry(panelWidth + offset * 2, panelHeight + offset * 2, 0.04), clear)
@@ -1021,7 +1130,7 @@ export class SceneRuntime {
           const cutout = createAcrylicCutoutTexture(texture.image as CanvasImageSource, width, height, panelWidth, panelHeight, offset)
           const cutoutMaterial = createClearAcrylicMaterial({
             mode: acrylicRenderMode,
-            map: cutout,
+            map: cutout.texture,
             color: 0xffffff,
             roughness: 0.04,
             thickness: 0.02,
@@ -1030,11 +1139,21 @@ export class SceneRuntime {
             side: THREE.DoubleSide
           })
           backing = new THREE.Mesh(new THREE.PlaneGeometry(panelWidth + offset * 2, panelHeight + offset * 2), cutoutMaterial)
+          contourRects = cutout.colliderRects
         } catch (error) {
           console.warn(`Could not generate acrylic outline for ${item.name}`, error)
           backing = new THREE.Mesh(new THREE.BoxGeometry(panelWidth + offset * 2, panelHeight + offset * 2, 0.04), clear)
+          collisionShape = 'rectangle'
         }
       }
+      acrylicCollider = createAcrylicColliderGeometry({
+        imageWidth: panelWidth,
+        imageHeight: panelHeight,
+        offset,
+        shape: collisionShape,
+        base: acrylicBase,
+        contourRects
+      })
       backing.position.copy(image.position).setZ(0)
       backing.renderOrder = 10
       const base = new THREE.Mesh(
@@ -1078,7 +1197,18 @@ export class SceneRuntime {
     }
 
     const bounds = new THREE.Box3().setFromObject(root)
-    return { id: item.id, root, bounds, body: null, mixer: null, clips: [], vrm: null, snapshot: cloneItem(item) }
+    return {
+      id: item.id,
+      root,
+      bounds,
+      body: null,
+      bodyWorldGeneration: 0,
+      mixer: null,
+      clips: [],
+      vrm: null,
+      snapshot: cloneItem(item),
+      acrylicCollider
+    }
   }
 
   private createErrorItem(item: DisplayItem): RuntimeItem {
@@ -1087,14 +1217,27 @@ export class SceneRuntime {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.7), material)
     mesh.position.y = 0.35
     root.add(mesh)
-    return { id: item.id, root, bounds: new THREE.Box3().setFromObject(root), body: null, mixer: null, clips: [], vrm: null, snapshot: cloneItem(item) }
+    return {
+      id: item.id,
+      root,
+      bounds: new THREE.Box3().setFromObject(root),
+      body: null,
+      bodyWorldGeneration: 0,
+      mixer: null,
+      clips: [],
+      vrm: null,
+      snapshot: cloneItem(item)
+    }
   }
 
   private syncRuntimeItem(runtime: RuntimeItem, item: DisplayItem, force = false): void {
     const transformChanged = transformsDiffer(runtime.snapshot.transform, item.transform)
     const physicsChanged = JSON.stringify(runtime.snapshot.physics) !== JSON.stringify(item.physics)
     const visibilityChanged = (runtime.snapshot.visible !== false) !== (item.visible !== false)
-    const missingPhysics = this.variant === 'editor' && item.visible !== false && !runtime.body
+    const missingPhysics = this.variant === 'editor' && item.visible !== false && (
+      !this.world ||
+      bodyNeedsRebuild(this.world, runtime.body, runtime.bodyWorldGeneration, this.worldGeneration)
+    )
     const scaleChanged = transformsDiffer(
       { ...runtime.snapshot.transform, position: item.transform.position, rotation: item.transform.rotation },
       { ...item.transform, position: item.transform.position, rotation: item.transform.rotation }
@@ -1106,6 +1249,7 @@ export class SceneRuntime {
       runtime.root.scale.copy(vector3(item.transform.scale))
     }
     runtime.root.visible = item.visible !== false
+    runtime.root.userData.selectionPassThrough = item.selectionPassThrough === true
     runtime.snapshot = cloneItem(item)
     this.configureAnimation(runtime)
 
@@ -1129,8 +1273,9 @@ export class SceneRuntime {
 
   private rebuildPhysics(runtime: RuntimeItem): void {
     if (!this.world) return
-    if (runtime.body) this.world.removeRigidBody(runtime.body)
+    if (runtime.body) this.removePhysicsBody(runtime.body, runtime.bodyWorldGeneration)
     runtime.body = null
+    runtime.bodyWorldGeneration = 0
 
     const item = runtime.snapshot
     if (item.visible === false) return
@@ -1147,7 +1292,7 @@ export class SceneRuntime {
     if (item.kind === 'builtin') {
       addBuiltInItemColliders(this.world, body, item, runtime.builtinColliders ?? [], item.transform.scale)
       runtime.body = body
-      this.settlementReported = false
+      runtime.bodyWorldGeneration = this.worldGeneration
       return
     }
 
@@ -1161,14 +1306,21 @@ export class SceneRuntime {
       .setCollisionGroups(itemCollisionGroups(item))
     this.world.createCollider(collider, body)
     runtime.body = body
-    this.settlementReported = false
+    runtime.bodyWorldGeneration = this.worldGeneration
   }
 
   private createImageCollider(runtime: RuntimeItem, item: DisplayItem): RAPIER.ColliderDesc {
     const scale = item.transform.scale
-    const scaleKey = `image:${scale.x.toFixed(4)}:${scale.y.toFixed(4)}:${scale.z.toFixed(4)}`
+    const scaleKey = `image:${item.imageDisplayType ?? 'acrylic'}:${item.acrylicShape ?? 'contour'}:${item.acrylicOffset ?? DEFAULT_ACRYLIC_OFFSET}:${scale.x.toFixed(4)}:${scale.y.toFixed(4)}:${scale.z.toFixed(4)}`
     if (runtime.colliderShape && runtime.colliderScaleKey === scaleKey) {
       return new RAPIER.ColliderDesc(runtime.colliderShape)
+    }
+
+    if (runtime.acrylicCollider) {
+      const collider = createAcrylicColliderDesc(runtime.acrylicCollider, scale)
+      runtime.colliderShape = collider.shape
+      runtime.colliderScaleKey = scaleKey
+      return collider
     }
 
     const panelBounds = new THREE.Box3()
@@ -1321,7 +1473,6 @@ export class SceneRuntime {
     if (localItem) localItem.transform = structuredClone(transform)
     this.rebuildPhysics(runtime)
     this.callbacks.onTransform(runtime.id, transform, false)
-    this.settlementReported = false
   }
 
   private createBoundsCollider(runtime: RuntimeItem, item: DisplayItem): RAPIER.ColliderDesc {
@@ -1343,7 +1494,9 @@ export class SceneRuntime {
         this.setSelection(null)
       }
     }
-    if (runtime.body && this.world) this.world.removeRigidBody(runtime.body)
+    if (runtime.body && this.world) this.removePhysicsBody(runtime.body, runtime.bodyWorldGeneration)
+    runtime.body = null
+    runtime.bodyWorldGeneration = 0
     if (this.dragTarget?.id === runtime.id) {
       this.dragTarget = null
       this.draggingTransform = false
@@ -1478,18 +1631,46 @@ export class SceneRuntime {
     body.setNextKinematicRotation(currentRotation)
   }
 
-  private limitPushedBodyVelocity(body: RAPIER.RigidBody): void {
+  private prepareRestoredPhysics(): void {
+    if (!this.world || !this.project || this.restoringPhysicsProjectId !== this.project.id) return
+
+    const entries = [...this.project.items]
+      .sort((left, right) => restoredItemSupportPriority(left) - restoredItemSupportPriority(right))
+      .flatMap((item) => {
+        const body = this.items.get(item.id)?.body
+        return body ? [{ body, preservePosition: item.physics.placementLocked }] : []
+      })
+    resolveRestoredBodyOverlaps(this.world, entries, 4)
+
+    for (const runtime of this.items.values()) {
+      const body = runtime.body
+      if (!body) continue
+      if (body.bodyType() === RAPIER.RigidBodyType.Dynamic) {
+        body.setLinvel({ x: 0, y: 0, z: 0 }, false)
+        body.setAngvel({ x: 0, y: 0, z: 0 }, false)
+      }
+      const position = body.translation()
+      const rotation = body.rotation()
+      runtime.root.position.set(position.x, position.y, position.z)
+      runtime.root.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w)
+    }
+
+    this.restoringPhysicsProjectId = null
+    this.physicsStabilizationFrames = RESTORED_PHYSICS_STABILIZATION_FRAMES
+  }
+
+  private limitBodyVelocity(body: RAPIER.RigidBody, maximumLinear: number, maximumAngular: number): void {
     const linear = body.linvel()
     const linearLength = Math.hypot(linear.x, linear.y, linear.z)
-    if (linearLength > 2.5) {
-      const factor = 2.5 / linearLength
+    if (linearLength > maximumLinear) {
+      const factor = maximumLinear / linearLength
       body.setLinvel({ x: linear.x * factor, y: linear.y * factor, z: linear.z * factor }, true)
     }
 
     const angular = body.angvel()
     const angularLength = Math.hypot(angular.x, angular.y, angular.z)
-    if (angularLength > 4) {
-      const factor = 4 / angularLength
+    if (angularLength > maximumAngular) {
+      const factor = maximumAngular / angularLength
       body.setAngvel({ x: angular.x * factor, y: angular.y * factor, z: angular.z * factor }, true)
     }
   }

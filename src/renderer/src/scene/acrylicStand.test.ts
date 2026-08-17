@@ -1,5 +1,28 @@
 import { describe, expect, it } from 'vitest'
-import { acrylicStandBaseDimensions } from './acrylicStand'
+import {
+  acrylicOffsetPixelRadius,
+  acrylicStandBaseDimensions,
+  clampAcrylicOffset,
+  DEFAULT_ACRYLIC_OFFSET
+} from './acrylicStand'
+
+describe('acrylic stand offset', () => {
+  it('allows a zero offset so the acrylic can sit flush with its base', () => {
+    expect(clampAcrylicOffset(0)).toBe(0)
+    expect(acrylicOffsetPixelRadius(0, 100)).toBe(0)
+  })
+
+  it('keeps offset values inside the supported range', () => {
+    expect(clampAcrylicOffset(-0.01)).toBe(0)
+    expect(clampAcrylicOffset(0.2)).toBe(0.12)
+    expect(clampAcrylicOffset(Number.NaN)).toBe(DEFAULT_ACRYLIC_OFFSET)
+  })
+
+  it('converts a visible offset to pixels without exceeding the texture limit', () => {
+    expect(acrylicOffsetPixelRadius(0.045, 100)).toBe(5)
+    expect(acrylicOffsetPixelRadius(0.12, 1000)).toBe(48)
+  })
+})
 
 describe('acrylic stand base proportions', () => {
   it('uses the shallow oval ratio of a typical character acrylic stand', () => {

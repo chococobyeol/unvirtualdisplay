@@ -22,6 +22,7 @@ import {
   Redo2,
   RotateCcw,
   Settings,
+  TriangleAlert,
   Trash2,
   Undo2,
   X,
@@ -62,6 +63,7 @@ import acrylicStepsFourPreview from '../assets/object-previews/acrylic-steps-4.j
 import acrylicStepsFivePreview from '../assets/object-previews/acrylic-steps-5.jpg'
 import pedestalObjectPreview from '../assets/object-previews/pedestal.jpg'
 import shelfObjectPreview from '../assets/object-previews/shelf.jpg'
+import { clampAcrylicOffset, DEFAULT_ACRYLIC_OFFSET } from '../scene/acrylicStand'
 import {
   createCatalogItem,
   entriesForCategory,
@@ -681,6 +683,7 @@ function ProjectRail({ project, projects, onInspect }: {
   const clear = useAppStore((state) => state.clearProject)
   const importAssets = useAppStore((state) => state.importAssets)
   const mutate = useAppStore((state) => state.mutateProject)
+  const assetErrors = useAppStore((state) => state.assetErrors)
   const selectedId = useAppStore((state) => state.selectedItemId)
   const select = useAppStore((state) => state.setSelectedItem)
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null)
@@ -940,6 +943,7 @@ function ProjectRail({ project, projects, onInspect }: {
     'item-row',
     item.id === selectedId ? 'active' : '',
     item.visible === false ? 'hidden' : '',
+    assetErrors[item.id] ? 'load-error' : '',
     item.id === draggingItemId ? 'dragging' : '',
     itemDrop?.targetId === item.id ? `drop-${itemDrop.placement}` : ''
   ].filter(Boolean).join(' ')
@@ -1116,6 +1120,7 @@ function ProjectRail({ project, projects, onInspect }: {
                 <span><b>{item.name}</b><small>{item.kind === 'builtin' ? t('builtinObject') : item.format.toUpperCase()}</small></span>
               </button>
               <span className="item-row-actions">
+                {assetErrors[item.id] && <span className="item-load-error" title={`${t('assetLoadFailed')}: ${assetErrors[item.id]}`} aria-label={t('assetLoadFailed')}><TriangleAlert aria-hidden="true" /></span>}
                 <button className={`item-row-action visibility${item.visible === false ? ' is-off' : ''}`} title={t(item.visible === false ? 'showItem' : 'hideItem')} aria-label={t(item.visible === false ? 'showItem' : 'hideItem')} aria-pressed={item.visible === false} onClick={() => toggleItemVisibility(item.id)}><Icon name={item.visible === false ? 'eyeOff' : 'eye'} /></button>
                 <button className="item-row-action danger" title={t('removeItem')} aria-label={t('removeItem')} onClick={() => deleteItem(item.id)}><Icon name="trash" /></button>
               </span>
@@ -1159,7 +1164,7 @@ function ProjectRail({ project, projects, onInspect }: {
   )
 }
 
-function Inspector({ item, project, caseSelected }: { item: DisplayItem | null; project: DisplayProject; caseSelected: boolean }): React.JSX.Element {
+function Inspector({ item, project, caseSelected, loadError }: { item: DisplayItem | null; project: DisplayProject; caseSelected: boolean; loadError?: string }): React.JSX.Element {
   const { t } = useTranslation()
   const mutate = useAppStore((state) => state.mutateProject)
   const select = useAppStore((state) => state.setSelectedItem)
@@ -1180,6 +1185,7 @@ function Inspector({ item, project, caseSelected }: { item: DisplayItem | null; 
           <VectorFields label={t('scale')} value={project.displayTransform.scale} onChange={(scale) => mutate((draft) => { draft.displayTransform.scale = scale })} />
         </section>
       </> : !item ? <div className="empty-inspector"><span>◇</span><p>{t('noSelection')}</p></div> : <>
+        {loadError && <div className="asset-load-error" role="status"><TriangleAlert aria-hidden="true" /><span><strong>{t('assetLoadFailed')}</strong><small>{t('assetLoadFailedHint')}</small><code>{loadError}</code></span></div>}
         <input className="item-name-input" value={item.name} onChange={(event) => updateItem((target) => { target.name = event.target.value })} />
         <section className="property-group">
           <h3>{t('transform')}</h3>
@@ -1215,6 +1221,15 @@ function Inspector({ item, project, caseSelected }: { item: DisplayItem | null; 
           </label>}
         </section>}
         <section className="property-group">
+          <h3>{t('editingBehavior')}</h3>
+          <Toggle
+            checked={item.selectionPassThrough === true}
+            label={t('selectionPassThrough')}
+            hint={t('selectionPassThroughHint')}
+            onChange={(selectionPassThrough) => updateItem((target) => { target.selectionPassThrough = selectionPassThrough })}
+          />
+        </section>
+        <section className="property-group">
           <h3>{t('physics')}</h3>
           <Toggle checked={item.physics.collision} label={t('collision')} onChange={(collision) => updateItem((target) => { target.physics.collision = collision })} />
           <Toggle checked={item.physics.preventToppling} label={t('preventToppling')} hint={t('preventTopplingHint')} onChange={(preventToppling) => updateItem((target) => { target.physics.preventToppling = preventToppling })} />
@@ -1234,8 +1249,8 @@ function Inspector({ item, project, caseSelected }: { item: DisplayItem | null; 
             </label>
             <label className="range-row acrylic-offset-row">
               <span>{t('acrylicOffset')}</span>
-              <input type="range" min="1.5" max="12" step="0.5" value={(item.acrylicOffset ?? 0.045) * 100} onChange={(event) => updateItem((target) => { target.acrylicOffset = Number(event.target.value) / 100 })} />
-              <input className="acrylic-offset-number" type="number" min="1.5" max="12" step="0.5" value={((item.acrylicOffset ?? 0.045) * 100).toFixed(1)} onChange={(event) => updateItem((target) => { target.acrylicOffset = Math.min(0.12, Math.max(0.015, Number(event.target.value) / 100)) })} />
+              <input type="range" min="0" max="12" step="0.5" value={(item.acrylicOffset ?? DEFAULT_ACRYLIC_OFFSET) * 100} onChange={(event) => updateItem((target) => { target.acrylicOffset = clampAcrylicOffset(Number(event.target.value) / 100) })} />
+              <input className="acrylic-offset-number" type="number" min="0" max="12" step="0.5" value={((item.acrylicOffset ?? DEFAULT_ACRYLIC_OFFSET) * 100).toFixed(1)} onChange={(event) => updateItem((target) => { target.acrylicOffset = clampAcrylicOffset(Number(event.target.value) / 100) })} />
             </label>
           </>}
         </section>}
@@ -1284,7 +1299,10 @@ function SettingsPanel({ settings, project, onClose }: { settings: AppSettings; 
           <h3>{t('settingsWidget')}</h3>
           <Toggle checked={settings.alwaysOnTop} label={t('alwaysOnTop')} onChange={(alwaysOnTop) => void update({ alwaysOnTop })} />
           <Toggle checked={settings.clickThrough} label={t('clickThrough')} hint={t('clickThroughHint')} onChange={(clickThrough) => void update({ clickThrough })} />
-          <button className="widget-adjust-button" onClick={() => void window.unvirtual.setDisplayEditing(true)}>{t('adjustWidget')}</button>
+          <div className="widget-position-actions">
+            <button className="widget-adjust-button" onClick={() => void window.unvirtual.setDisplayEditing(true)}>{t('adjustWidget')}</button>
+            <button className="widget-reset-position-button" onClick={() => void window.unvirtual.resetDisplayBounds()}>{t('resetWidgetPosition')}</button>
+          </div>
           <h4>{t('widgetBackground')}</h4>
           <label className="select-row"><span>{t('backgroundMode')}</span><select value={project.background.mode} onChange={(event) => mutate((draft) => { draft.background.mode = event.target.value as BackgroundMode })}>
             <option value="transparent">{t('backgroundTransparent')}</option>
@@ -1337,6 +1355,8 @@ export function EditorApp(): React.JSX.Element | null {
   const undo = useAppStore((state) => state.undo)
   const redo = useAppStore((state) => state.redo)
   const setDisplayVisible = useAppStore((state) => state.setDisplayVisible)
+  const assetErrors = useAppStore((state) => state.assetErrors)
+  const setAssetError = useAppStore((state) => state.setAssetError)
   const [draggingFiles, setDraggingFiles] = useState(false)
   const [cameraResetKey, setCameraResetKey] = useState(0)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -1478,6 +1498,7 @@ export function EditorApp(): React.JSX.Element | null {
             }}
             onTransform={updateTransform}
             onCamera={(camera) => mutate((draft) => { draft.camera = camera }, false)}
+            onAssetError={setAssetError}
             cameraResetKey={cameraResetKey}
             onResetCamera={settings.onboardingComplete ? resetCamera : undefined}
             resetCameraLabel={t('resetCamera')}
@@ -1515,7 +1536,7 @@ export function EditorApp(): React.JSX.Element | null {
       <aside className="inspector panel-surface">
         {settingsOpen
           ? <SettingsPanel settings={settings} project={project} onClose={() => setSettingsOpen(false)} />
-          : <Inspector item={selectedItem} project={project} caseSelected={selectedId === DISPLAY_CASE_SELECTION_ID} />}
+          : <Inspector item={selectedItem} project={project} caseSelected={selectedId === DISPLAY_CASE_SELECTION_ID} loadError={selectedItem ? assetErrors[selectedItem.id] : undefined} />}
       </aside>
       {!settings.onboardingComplete && <div className="onboarding-backdrop">
         <section className="onboarding-card">

@@ -12,6 +12,7 @@ interface SceneViewProps {
   onSelect?: (id: string | null) => void
   onTransform?: (id: string, transform: TransformState, remember?: boolean) => void
   onCamera?: (camera: CameraSettings) => void
+  onAssetError?: (id: string, error: string | null) => void
   cameraResetKey?: number
   onResetCamera?: () => void
   resetCameraLabel?: string
@@ -21,15 +22,15 @@ export interface SceneViewHandle {
   capture: () => Promise<Blob | null>
 }
 
-export const SceneView = forwardRef<SceneViewHandle, SceneViewProps>(function SceneView({ project, quality, variant, selectedItemId = null, transformMode = 'translate', onSelect, onTransform, onCamera, cameraResetKey = 0, onResetCamera, resetCameraLabel }, ref): React.JSX.Element {
+export const SceneView = forwardRef<SceneViewHandle, SceneViewProps>(function SceneView({ project, quality, variant, selectedItemId = null, transformMode = 'translate', onSelect, onTransform, onCamera, onAssetError, cameraResetKey = 0, onResetCamera, resetCameraLabel }, ref): React.JSX.Element {
   const Runtime = SceneRuntime
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const runtimeRef = useRef<SceneRuntime | null>(null)
   const projectRef = useRef(project)
-  const callbacksRef = useRef({ onSelect, onTransform, onCamera })
+  const callbacksRef = useRef({ onSelect, onTransform, onCamera, onAssetError })
 
   projectRef.current = project
-  callbacksRef.current = { onSelect, onTransform, onCamera }
+  callbacksRef.current = { onSelect, onTransform, onCamera, onAssetError }
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -39,7 +40,8 @@ export const SceneView = forwardRef<SceneViewHandle, SceneViewProps>(function Sc
       onSelect: (id) => callbacksRef.current.onSelect?.(id),
       onTransform: (id, transform, remember) => callbacksRef.current.onTransform?.(id, transform, remember),
       onCameraPreview: (camera) => window.unvirtual.previewCamera({ projectId: projectRef.current.id, camera }),
-      onCamera: (camera) => callbacksRef.current.onCamera?.(camera)
+      onCamera: (camera) => callbacksRef.current.onCamera?.(camera),
+      onAssetError: (id, error) => callbacksRef.current.onAssetError?.(id, error)
     })
     runtimeRef.current = runtime
     void runtime.initialize().then(() => {

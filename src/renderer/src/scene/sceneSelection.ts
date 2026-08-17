@@ -29,6 +29,10 @@ function rootContaining(object: THREE.Object3D, roots: THREE.Object3D[]): THREE.
   return null
 }
 
+function isSelectionPassThroughRoot(root: THREE.Object3D): boolean {
+  return root.userData.selectionPassThrough === true
+}
+
 function isPassThroughCaseSurface(object: THREE.Object3D): boolean {
   if (object instanceof THREE.Line || object instanceof THREE.LineSegments) return true
   const material = (object as THREE.Mesh).material
@@ -43,6 +47,7 @@ export function pickItemSelection(raycaster: THREE.Raycaster, itemRoots: THREE.O
   for (const hit of raycaster.intersectObjects(itemRoots, true)) {
     const root = rootContaining(hit.object, itemRoots)
     if (!root || !isVisibleThroughRoot(hit.object, root)) continue
+    if (isSelectionPassThroughRoot(root)) continue
     const itemId = itemIdFromHit(hit.object)
     if (itemId) return itemId
   }
@@ -79,6 +84,7 @@ export function pickSceneSelection(
     const itemRoot = rootContaining(hit.object, itemRoots)
     if (itemRoot) {
       if (!isVisibleThroughRoot(hit.object, itemRoot)) continue
+      if (isSelectionPassThroughRoot(itemRoot)) continue
       const itemId = itemIdFromHit(hit.object)
       if (itemId) return itemId
       continue

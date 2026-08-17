@@ -107,6 +107,7 @@ export function createCatalogItem(entry: ObjectCatalogEntry, id: string, name: s
     assetUrl: '',
     relativePath: '',
     visible: true,
+    selectionPassThrough: false,
     builtin: structuredClone(entry.builtin),
     transform: {
       position: { x: 0, y: 0, z: 0 },

@@ -38,6 +38,44 @@ export function itemCollisionGroups(item: DisplayItem): number {
   return groupMask(ITEM_GROUP, ENVIRONMENT_GROUP | (item.physics.collision ? ITEM_GROUP : 0))
 }
 
+function registeredBody(
+  world: RAPIER.World,
+  body: RAPIER.RigidBody | null,
+  bodyWorldGeneration: number,
+  currentWorldGeneration: number
+): RAPIER.RigidBody | null {
+  if (body === null || bodyWorldGeneration !== currentWorldGeneration) return null
+
+  // Do not call a method on `body` before checking the current world's
+  // registry. A wrapper left behind after its WASM body was removed can throw
+  // and poison Rapier's internal borrow state even when that error is caught.
+  const currentBody = world.bodies.get(body.handle)
+  return currentBody?.isEnabled() ? currentBody : null
+}
+
+export function bodyNeedsRebuild(
+  world: RAPIER.World,
+  body: RAPIER.RigidBody | null,
+  bodyWorldGeneration: number,
+  currentWorldGeneration: number
+): boolean {
+  return registeredBody(world, body, bodyWorldGeneration, currentWorldGeneration) === null
+}
+
+export function bodyCanSyncSettledTransform(
+  world: RAPIER.World,
+  body: RAPIER.RigidBody,
+  bodyWorldGeneration: number,
+  currentWorldGeneration: number,
+  dragging: boolean
+): boolean {
+  if (dragging) return false
+  const currentBody = registeredBody(world, body, bodyWorldGeneration, currentWorldGeneration)
+  return currentBody !== null && (
+    currentBody.bodyType() !== RAPIER.RigidBodyType.Dynamic || currentBody.isSleeping()
+  )
+}
+
 /**
  * Tests a body's collider shapes against everything their collision groups
  * actually permit. In particular, this includes other display items when
@@ -134,6 +172,55 @@ export function findNearestClearBodyPosition(
     }
   }
   return null
+}
+
+export interface RestoredBodyEntry {
+  body: RAPIER.RigidBody
+  preservePosition: boolean
+}
+
+export interface RestoredBodyResolution {
+  moved: Map<number, Vec3>
+  unresolved: Set<number>
+}
+
+/**
+ * Resolves meaningful penetrations before the first restored physics step.
+ * Later entries move first, allowing callers to place supports before the
+ * contents that should be repaired around them.
+ */
+export function resolveRestoredBodyOverlaps(
+  world: RAPIER.World,
+  entries: readonly RestoredBodyEntry[],
+  maximumDistance = 1
+): RestoredBodyResolution {
+  const moved = new Map<number, Vec3>()
+  const unresolved = new Set<number>()
+
+  // setTranslation updates the body immediately, but attached collider world
+  // transforms are propagated lazily. The overlap queries below read collider
+  // transforms directly, so keep them in sync while repairing multiple bodies.
+  world.propagateModifiedBodyPositionsToColliders()
+
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const { body, preservePosition } = entries[index]
+    if (body.bodyType() === RAPIER.RigidBodyType.Dynamic) {
+      body.setLinvel({ x: 0, y: 0, z: 0 }, false)
+      body.setAngvel({ x: 0, y: 0, z: 0 }, false)
+    }
+    if (preservePosition || !bodyOverlapsCollisionScene(world, body, { x: 0, y: 0, z: 0 }, true)) continue
+
+    const clear = findNearestClearBodyPosition(world, body, maximumDistance, true)
+    if (!clear) {
+      unresolved.add(body.handle)
+      continue
+    }
+    body.setTranslation(clear, false)
+    world.propagateModifiedBodyPositionsToColliders()
+    moved.set(body.handle, clear)
+  }
+
+  return { moved, unresolved }
 }
 
 export function createItemRigidBodyDescriptor(

@@ -13,9 +13,19 @@ import {
   shell,
   Tray
 } from 'electron'
-import type { AppSettings, BootstrapData, CameraPreviewEvent, DisplayProject, DisplayResizeEdge, ProjectEvent, ProjectResetScope } from '../shared/types'
+import type {
+  AppSettings,
+  BootstrapData,
+  CameraPreviewEvent,
+  DisplayProject,
+  DisplayResizeEdge,
+  ProjectChanges,
+  ProjectEvent,
+  ProjectPatch,
+  ProjectResetScope
+} from '../shared/types'
 import { ProjectStore } from './project-store'
-import { getDefaultDisplayBounds } from './window-bounds'
+import { getDefaultDisplayBounds, recoverDisplayBounds } from './window-bounds'
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -23,6 +33,11 @@ protocol.registerSchemesAsPrivileged([
     privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true }
   }
 ])
+
+const developmentDataPath = app.isPackaged
+  ? undefined
+  : process.env.UNVIRTUAL_DISPLAY_DATA_PATH?.trim()
+if (developmentDataPath) app.setPath('userData', developmentDataPath)
 
 let editorWindow: BrowserWindow | null = null
 let displayWindow: BrowserWindow | null = null
@@ -44,7 +59,7 @@ let displayMove: {
 } | null = null
 let hasShownTrayHint = false
 let quitSaveComplete = false
-const latestProjectPreviews = new Map<string, DisplayProject>()
+const latestProjectPatches = new Map<string, ProjectChanges>()
 const diagnosticLines: string[] = []
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 
@@ -178,6 +193,7 @@ function hideEditorWindowToTray(showHint = false): void {
 
 async function setDisplayWindowVisible(visible: boolean): Promise<void> {
   displayVisible = visible
+  await store.updateSettings({ displayVisible: visible })
   if (visible) {
     const window = await ensureDisplayWindow()
     if (isQuitting || !displayVisible || window.isDestroyed()) return
@@ -191,7 +207,6 @@ async function setDisplayWindowVisible(visible: boolean): Promise<void> {
 }
 
 function publishDisplayVisibility(): void {
-  if (displayWindow && !displayWindow.isDestroyed()) displayVisible = displayWindow.isVisible()
   broadcast('display:visibility-changed', displayVisible)
   refreshTrayMenu()
 }
@@ -224,20 +239,26 @@ function showDisplayContextMenu(): void {
 
 function finishAppQuit(): void {
   quitSaveComplete = true
-  latestProjectPreviews.clear()
+  latestProjectPatches.clear()
   setImmediate(() => app.quit())
 }
 
 function requestAppQuit(): void {
   if (isQuitting) return
   isQuitting = true
-  if (quitSaveComplete || latestProjectPreviews.size === 0) {
+  if (quitSaveComplete) {
     finishAppQuit()
     return
   }
 
-  const previews = [...latestProjectPreviews.values()].map((project) => structuredClone(project))
-  void Promise.all(previews.map((project) => store.saveProject(project)))
+  const patches = [...latestProjectPatches.entries()].map(([projectId, changes]) => ({
+    projectId,
+    changes: structuredClone(changes)
+  }))
+  void Promise.all([
+    ...patches.map(({ projectId, changes }) => store.updateProject(projectId, changes)),
+    saveDisplayBoundsNow()
+  ])
     .catch((error) => addDiagnostic(`Final project save failed: ${error instanceof Error ? error.message : String(error)}`))
     .finally(finishAppQuit)
 }
@@ -305,7 +326,15 @@ async function ensureDisplayWindow(): Promise<BrowserWindow> {
 
 async function createDisplayWindow(): Promise<BrowserWindow> {
   const settings = store.settings
-  const bounds = settings.displayBounds ?? getDefaultDisplayBounds(screen.getPrimaryDisplay().workArea)
+  const primaryWorkArea = screen.getPrimaryDisplay().workArea
+  const bounds = recoverDisplayBounds(
+    settings.displayBounds,
+    screen.getAllDisplays().map((display) => display.workArea),
+    primaryWorkArea
+  )
+  if (settings.displayBounds && JSON.stringify(settings.displayBounds) !== JSON.stringify(bounds)) {
+    await store.updateSettings({ displayBounds: bounds })
+  }
   const window = new BrowserWindow({
     title: 'Unvirtual Display',
     ...bounds,
@@ -350,9 +379,41 @@ function queueDisplayBoundsSave(): void {
   if (!displayWindow || displayWindow.isDestroyed()) return
   if (boundsSaveTimer) clearTimeout(boundsSaveTimer)
   boundsSaveTimer = setTimeout(() => {
-    if (!displayWindow || displayWindow.isDestroyed()) return
-    void store.updateSettings({ displayBounds: displayWindow.getBounds() })
+    boundsSaveTimer = null
+    void saveDisplayBoundsNow()
   }, 300)
+}
+
+async function saveDisplayBoundsNow(): Promise<void> {
+  if (boundsSaveTimer) clearTimeout(boundsSaveTimer)
+  boundsSaveTimer = null
+  if (!displayWindow || displayWindow.isDestroyed()) return
+  await store.updateSettings({ displayBounds: displayWindow.getBounds() })
+}
+
+async function resetDisplayBounds(): Promise<void> {
+  const bounds = getDefaultDisplayBounds(screen.getPrimaryDisplay().workArea)
+  const window = await ensureDisplayWindow()
+  if (window.isDestroyed()) return
+  window.setBounds(bounds)
+  await store.updateSettings({ displayBounds: bounds })
+  if (displayVisible) window.showInactive()
+}
+
+function rememberProjectPatch(patch: ProjectPatch): void {
+  latestProjectPatches.set(patch.projectId, {
+    ...latestProjectPatches.get(patch.projectId),
+    ...structuredClone(patch.changes)
+  })
+}
+
+function clearSavedProjectChanges(projectId: string, saved: ProjectChanges): void {
+  const pending = latestProjectPatches.get(projectId)
+  if (!pending) return
+  for (const key of Object.keys(saved) as (keyof ProjectChanges)[]) {
+    if (JSON.stringify(pending[key]) === JSON.stringify(saved[key])) delete pending[key]
+  }
+  if (Object.keys(pending).length === 0) latestProjectPatches.delete(projectId)
 }
 
 function broadcast(channel: string, payload: unknown): void {
@@ -413,7 +474,7 @@ function registerIpc(): void {
     return result
   })
   ipcMain.handle('project:delete', async (_event, projectId: string) => {
-    latestProjectPreviews.delete(projectId)
+    latestProjectPatches.delete(projectId)
     const result = await store.deleteProject(projectId)
     broadcast('project:changed', result)
     return result
@@ -430,28 +491,32 @@ function registerIpc(): void {
   })
   ipcMain.handle('project:save', async (_event, project: DisplayProject) => {
     const result = await store.saveProject(project)
-    const preview = latestProjectPreviews.get(project.id)
-    if (preview && preview.revision <= result.project.revision) latestProjectPreviews.delete(project.id)
+    latestProjectPatches.delete(project.id)
     broadcast('project:changed', result)
     return result
   })
+  ipcMain.handle('project:update', async (_event, patch: ProjectPatch) => {
+    const result = await store.updateProject(patch.projectId, patch.changes)
+    clearSavedProjectChanges(patch.projectId, patch.changes)
+    broadcast('project:patched', result)
+    return result
+  })
   ipcMain.handle('project:reset', async (_event, projectId: string, scope: ProjectResetScope) => {
-    latestProjectPreviews.delete(projectId)
+    latestProjectPatches.delete(projectId)
     const result = await store.resetProject(projectId, scope)
     broadcast('project:changed', result)
     return result
   })
   ipcMain.handle('data:reset', async () => {
-    latestProjectPreviews.clear()
+    latestProjectPatches.clear()
     const result = await store.resetData()
     broadcast('project:changed', result)
     return result
   })
-  ipcMain.on('project:preview', (event, project: DisplayProject) => {
-    if (project.id !== store.activeProjectId) return
-    const existing = latestProjectPreviews.get(project.id)
-    if (!existing || existing.revision <= project.revision) latestProjectPreviews.set(project.id, structuredClone(project))
-    broadcastExcept(event.sender, 'project:preview', project)
+  ipcMain.on('project:preview', (event, patch: ProjectPatch) => {
+    if (patch.projectId !== store.activeProjectId) return
+    rememberProjectPatch(patch)
+    broadcastExcept(event.sender, 'project:preview', patch)
   })
   ipcMain.on('camera:preview', (event, preview: CameraPreviewEvent) => {
     if (preview.projectId !== store.activeProjectId) return
@@ -572,6 +637,10 @@ function registerIpc(): void {
     await setDisplayWindowVisible(visible)
     return displayVisible
   })
+  ipcMain.handle('display:reset-bounds', async () => {
+    await setDisplayWindowVisible(true)
+    await resetDisplayBounds()
+  })
   ipcMain.on('display:show-context-menu', (event) => {
     if (event.sender !== displayWindow?.webContents || store.settings.clickThrough) return
     showDisplayContextMenu()
@@ -608,7 +677,10 @@ function registerIpc(): void {
     displayWindow.setBounds({ x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) })
   })
   ipcMain.on('display:resize-end', (event) => {
-    if (event.sender === displayWindow?.webContents) displayResize = null
+    if (event.sender === displayWindow?.webContents) {
+      displayResize = null
+      void saveDisplayBoundsNow()
+    }
   })
   ipcMain.on('display:move-start', (event, point: { x: number; y: number }) => {
     if (event.sender !== displayWindow?.webContents || !displayWindow || (!displayEditing && store.settings.clickThrough)) return
@@ -623,7 +695,11 @@ function registerIpc(): void {
     )
   })
   ipcMain.on('display:move-end', (event) => {
-    if (event.sender === displayWindow?.webContents) displayMove = null
+    if (event.sender === displayWindow?.webContents) {
+      displayMove = null
+      applyDisplaySettings(store.settings)
+      void saveDisplayBoundsNow()
+    }
   })
 }
 
@@ -683,11 +759,12 @@ app.on('second-instance', () => {
 app.whenReady().then(async () => {
   if (!hasSingleInstanceLock) return
   addDiagnostic(`Application started: ${process.platform} ${process.arch}`)
-  const dataPath = app.isPackaged
+  const dataPath = app.isPackaged || developmentDataPath
     ? app.getPath('userData')
     : join(app.getPath('appData'), 'unvirtual-display-dev')
   store = new ProjectStore(dataPath, app.getLocale())
   await store.initialize()
+  displayVisible = store.settings.displayVisible
 
   protocol.handle('uvd', (request) => {
     try {
@@ -716,7 +793,7 @@ app.on('activate', () => {
   ])
 })
 app.on('before-quit', (event) => {
-  if (quitSaveComplete || latestProjectPreviews.size === 0) {
+  if (quitSaveComplete || (latestProjectPatches.size === 0 && !boundsSaveTimer)) {
     isQuitting = true
     return
   }

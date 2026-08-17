@@ -5,13 +5,22 @@ import type {
   DisplayItem,
   DisplayProject,
   ImportedAsset,
+  ProjectChanges,
   ProjectEvent,
+  ProjectPatch,
+  ProjectPatchEvent,
   ProjectResetScope,
   ProjectSummary,
   TransformMode,
   TransformState
 } from '../../shared/types'
-import { createDefaultDisplayTransform, createDefaultLightingSettings, DISPLAY_CASE_SELECTION_ID, normalizeCasePreset } from '../../shared/types'
+import {
+  createDefaultDisplayTransform,
+  createDefaultLightingSettings,
+  DISPLAY_CASE_SELECTION_ID,
+  normalizeCasePreset,
+  PROJECT_CHANGE_KEYS
+} from '../../shared/types'
 import { setLanguage } from './i18n'
 
 interface AppState {
@@ -24,12 +33,14 @@ interface AppState {
   project: DisplayProject | null
   settings: AppSettings | null
   selectedItemId: string | null
+  assetErrors: Record<string, string>
   transformMode: TransformMode
   saveStatus: 'saved' | 'saving'
   history: DisplayProject[]
   future: DisplayProject[]
   initialize: () => Promise<void>
   setSelectedItem: (id: string | null) => void
+  setAssetError: (id: string, error: string | null) => void
   setTransformMode: (mode: TransformMode) => void
   mutateProject: (mutate: (draft: DisplayProject) => void, remember?: boolean) => void
   updateItemTransform: (id: string, transform: TransformState, remember?: boolean) => void
@@ -51,8 +62,9 @@ interface AppState {
 }
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null
-let pendingSaveProject: DisplayProject | null = null
+let pendingSavePatch: ProjectPatch | null = null
 let saveQueue: Promise<void> = Promise.resolve()
+let queuedSaveCount = 0
 let listenersBound = false
 
 type StoreSet = (partial: Partial<AppState>) => void
@@ -67,6 +79,7 @@ function newItem(asset: ImportedAsset, index: number): DisplayItem {
     assetUrl: asset.assetUrl,
     relativePath: asset.relativePath,
     visible: true,
+    selectionPassThrough: false,
     imageDisplayType: asset.kind === 'image' ? 'acrylic' : undefined,
     acrylicShape: asset.kind === 'image' ? 'contour' : undefined,
     acrylicOffset: asset.kind === 'image' ? 0.045 : undefined,
@@ -116,6 +129,40 @@ function summariesWithCurrent(projects: ProjectSummary[], current: DisplayProjec
     : summary)
 }
 
+function errorsForProject(errors: Record<string, string>, project: DisplayProject): Record<string, string> {
+  const itemIds = new Set(project.items.map((item) => item.id))
+  return Object.fromEntries(Object.entries(errors).filter(([id]) => itemIds.has(id)))
+}
+
+function projectChanges(before: DisplayProject, after: DisplayProject): ProjectChanges {
+  const changes: ProjectChanges = {}
+  for (const key of PROJECT_CHANGE_KEYS) {
+    if (JSON.stringify(before[key]) !== JSON.stringify(after[key])) {
+      Object.assign(changes, { [key]: structuredClone(after[key]) })
+    }
+  }
+  return changes
+}
+
+function applyChanges(project: DisplayProject, changes: ProjectChanges): DisplayProject {
+  const next = cloneProject(project)
+  for (const key of PROJECT_CHANGE_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(changes, key)) {
+      Object.assign(next, { [key]: structuredClone(changes[key]) })
+    }
+  }
+  return withDisplayDefaults(next)
+}
+
+function createPatch(before: DisplayProject, after: DisplayProject): ProjectPatch {
+  return {
+    projectId: after.id,
+    revision: after.revision,
+    updatedAt: after.updatedAt,
+    changes: projectChanges(before, after)
+  }
+}
+
 function applyEvent(set: StoreSet, get: StoreGet, event: ProjectEvent): void {
   const eventProject = withDisplayDefaults(event.project)
   const current = get().project
@@ -136,45 +183,81 @@ function applyEvent(set: StoreSet, get: StoreGet, event: ProjectEvent): void {
     project: eventProject,
     projects: event.projects,
     selectedItemId: selectedItemId && (selectedItemId === DISPLAY_CASE_SELECTION_ID || eventProject.items.some((item) => item.id === selectedItemId)) ? selectedItemId : null,
+    assetErrors: projectChanged ? {} : errorsForProject(get().assetErrors, eventProject),
     saveStatus: 'saved',
     history: projectChanged ? [] : get().history,
     future: projectChanged ? [] : get().future
   })
 }
 
-function applyPreview(set: StoreSet, get: StoreGet, project: DisplayProject): void {
-  project = withDisplayDefaults(project)
+function applyPatchEvent(set: StoreSet, get: StoreGet, event: ProjectPatchEvent): void {
   const current = get().project
-  if (current && (current.id !== project.id || current.revision > project.revision)) return
+  if (!current || current.id !== event.project.id || event.project.id !== event.activeProjectId) {
+    set({ projects: summariesWithCurrent(event.projects, current) })
+    return
+  }
+  const project = applyChanges(current, event.changes)
+  project.revision = Math.max(current.revision, event.project.revision)
+  project.updatedAt = event.project.updatedAt
+  const selectedItemId = get().selectedItemId
   set({
     project,
-    projects: summariesWithCurrent(get().projects, project),
-    selectedItemId: get().selectedItemId && (get().selectedItemId === DISPLAY_CASE_SELECTION_ID || project.items.some((item) => item.id === get().selectedItemId))
-      ? get().selectedItemId
-      : null
+    projects: summariesWithCurrent(event.projects, project),
+    selectedItemId: selectedItemId && (selectedItemId === DISPLAY_CASE_SELECTION_ID || project.items.some((item) => item.id === selectedItemId))
+      ? selectedItemId
+      : null,
+    assetErrors: errorsForProject(get().assetErrors, project)
   })
 }
 
-function enqueueSave(project: DisplayProject, set: StoreSet, get: StoreGet): Promise<void> {
-  const snapshot = cloneProject(project)
+function applyPreview(set: StoreSet, get: StoreGet, patch: ProjectPatch): void {
+  const current = get().project
+  if (!current || current.id !== patch.projectId) return
+  const project = applyChanges(current, patch.changes)
+  project.revision = Math.max(current.revision, patch.revision)
+  project.updatedAt = patch.updatedAt
+  const selectedItemId = get().selectedItemId
+  set({
+    project,
+    projects: summariesWithCurrent(get().projects, project),
+    selectedItemId: selectedItemId && (selectedItemId === DISPLAY_CASE_SELECTION_ID || project.items.some((item) => item.id === selectedItemId))
+      ? selectedItemId
+      : null,
+    assetErrors: errorsForProject(get().assetErrors, project)
+  })
+}
+
+function enqueueSave(patch: ProjectPatch, set: StoreSet, get: StoreGet): Promise<void> {
+  const snapshot = structuredClone(patch)
+  queuedSaveCount += 1
   const operation = saveQueue.catch(() => undefined).then(async () => {
+    let succeeded = false
     try {
-      applyEvent(set, get, await window.unvirtual.saveProject(snapshot))
+      applyPatchEvent(set, get, await window.unvirtual.updateProject(snapshot))
+      succeeded = true
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error), saveStatus: 'saving' })
+    } finally {
+      queuedSaveCount -= 1
+      if (succeeded && queuedSaveCount === 0 && !pendingSavePatch && get().project?.id === snapshot.projectId) set({ saveStatus: 'saved' })
     }
   })
   saveQueue = operation
   return operation
 }
 
-function scheduleSave(project: DisplayProject, set: StoreSet, get: StoreGet): void {
-  pendingSaveProject = cloneProject(project)
+function scheduleSave(patch: ProjectPatch, set: StoreSet, get: StoreGet): void {
+  pendingSavePatch = pendingSavePatch?.projectId === patch.projectId
+    ? {
+      ...patch,
+      changes: { ...pendingSavePatch.changes, ...structuredClone(patch.changes) }
+    }
+    : structuredClone(patch)
   if (saveTimer) clearTimeout(saveTimer)
   saveTimer = setTimeout(() => {
     saveTimer = null
-    const pending = pendingSaveProject
-    pendingSaveProject = null
+    const pending = pendingSavePatch
+    pendingSavePatch = null
     if (pending) void enqueueSave(pending, set, get)
   }, 280)
 }
@@ -182,8 +265,8 @@ function scheduleSave(project: DisplayProject, set: StoreSet, get: StoreGet): vo
 async function flushPendingSave(set: StoreSet, get: StoreGet): Promise<void> {
   if (saveTimer) clearTimeout(saveTimer)
   saveTimer = null
-  const pending = pendingSaveProject
-  pendingSaveProject = null
+  const pending = pendingSavePatch
+  pendingSavePatch = null
   if (pending) await enqueueSave(pending, set, get)
   else await saveQueue.catch(() => undefined)
 }
@@ -205,6 +288,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   project: null,
   settings: null,
   selectedItemId: null,
+  assetErrors: {},
   transformMode: 'translate',
   saveStatus: 'saved',
   history: [],
@@ -229,7 +313,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (!listenersBound) {
         listenersBound = true
         window.unvirtual.onProjectChanged((event) => applyEvent(set, get, event))
-        window.unvirtual.onProjectPreview((project) => applyPreview(set, get, project))
+        window.unvirtual.onProjectPatched((event) => applyPatchEvent(set, get, event))
+        window.unvirtual.onProjectPreview((patch) => applyPreview(set, get, patch))
         window.unvirtual.onSettingsChanged(({ settings }) => {
           void setLanguage(settings.language)
           set({ settings })
@@ -242,6 +327,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setSelectedItem: (selectedItemId) => set({ selectedItemId }),
+  setAssetError: (id, error) => set((state) => {
+    const assetErrors = { ...state.assetErrors }
+    if (error) assetErrors[id] = error.slice(0, 500)
+    else delete assetErrors[id]
+    return { assetErrors }
+  }),
   setTransformMode: (transformMode) => set({ transformMode }),
 
   mutateProject: (mutate, remember = true) => {
@@ -252,6 +343,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (JSON.stringify(next) === JSON.stringify(current)) return
     next.revision = current.revision + 1
     next.updatedAt = new Date().toISOString()
+    const patch = createPatch(current, next)
     set({
       project: next,
       projects: summariesWithCurrent(get().projects, next),
@@ -259,8 +351,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       history: remember ? [...get().history.slice(-49), current] : get().history,
       future: remember ? [] : get().future
     })
-    window.unvirtual.previewProject(next)
-    scheduleSave(next, set, get)
+    window.unvirtual.previewProject(patch)
+    scheduleSave(patch, set, get)
   },
 
   updateItemTransform: (id, transform, remember = true) => {
@@ -357,17 +449,19 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!current || history.length === 0) return
     const previous = history.at(-1)!
     const next = makeNextRevision(previous, current)
+    const patch = createPatch(current, next)
     set({ history: history.slice(0, -1), future: [current, ...get().future], project: next, saveStatus: 'saving' })
-    window.unvirtual.previewProject(next)
-    scheduleSave(next, set, get)
+    window.unvirtual.previewProject(patch)
+    scheduleSave(patch, set, get)
   },
   redo: () => {
     const future = get().future
     const current = get().project
     if (!current || future.length === 0) return
     const next = makeNextRevision(future[0], current)
+    const patch = createPatch(current, next)
     set({ history: [...get().history, current], future: future.slice(1), project: next, saveStatus: 'saving' })
-    window.unvirtual.previewProject(next)
-    scheduleSave(next, set, get)
+    window.unvirtual.previewProject(patch)
+    scheduleSave(patch, set, get)
   }
 }))

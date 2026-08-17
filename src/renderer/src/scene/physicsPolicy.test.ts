@@ -1,15 +1,18 @@
 import RAPIER from '@dimforge/rapier3d-compat'
 import { beforeAll, describe, expect, it } from 'vitest'
-import type { DisplayItem } from '../../../shared/types'
+import type { AcrylicCaseVariant, CasePreset, DisplayItem } from '../../../shared/types'
 import { createBuiltInObject } from './builtInObjects'
 import {
   addBuiltInItemColliders,
+  bodyCanSyncSettledTransform,
+  bodyNeedsRebuild,
   bodyOverlapsCollisionScene,
   configureItemRigidBody,
   createItemRigidBodyDescriptor,
   environmentCollisionGroups,
   findNearestClearBodyPosition,
-  itemCollisionGroups
+  itemCollisionGroups,
+  resolveRestoredBodyOverlaps
 } from './physicsPolicy'
 
 function pedestalItem(options: { y?: number, locked?: boolean, collision?: boolean } = {}): DisplayItem {
@@ -42,6 +45,22 @@ function acrylicStepsItem(y = 0): DisplayItem {
     name: 'Acrylic steps',
     builtin: { type: 'acrylicSteps', steps: 3 },
     physics: { collision: true, preventToppling: false, placementLocked: false }
+  }
+}
+
+function displayCaseItem(casePreset: CasePreset = 'modern3'): DisplayItem {
+  return {
+    ...pedestalItem(),
+    name: 'Modern display case',
+    builtin: { type: 'displayCase', casePreset }
+  }
+}
+
+function acrylicCaseItem(variant: AcrylicCaseVariant, y: number): DisplayItem {
+  return {
+    ...pedestalItem({ y }),
+    name: `Acrylic case ${variant}`,
+    builtin: { type: 'acrylicCase', acrylicCaseVariant: variant }
   }
 }
 
@@ -80,6 +99,65 @@ beforeAll(async () => {
 })
 
 describe('item physics policy', () => {
+  it('rebuilds a stale body reference after its body has been removed', () => {
+    const world = new RAPIER.World({ x: 0, y: 0, z: 0 })
+    const body = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic())
+
+    expect(bodyNeedsRebuild(world, body, 1, 1)).toBe(false)
+    world.removeRigidBody(body)
+    expect(bodyNeedsRebuild(world, body, 1, 1)).toBe(true)
+    world.free()
+  })
+
+  it('does not touch a body wrapper owned by an older physics world', () => {
+    const oldWorld = new RAPIER.World({ x: 0, y: 0, z: 0 })
+    const oldBody = oldWorld.createRigidBody(RAPIER.RigidBodyDesc.dynamic())
+    const currentWorld = new RAPIER.World({ x: 0, y: 0, z: 0 })
+
+    expect(bodyNeedsRebuild(currentWorld, oldBody, 1, 2)).toBe(true)
+    oldWorld.free()
+    currentWorld.free()
+  })
+
+  it('syncs each settled body without waiting for unrelated moving bodies', () => {
+    const world = new RAPIER.World({ x: 0, y: 0, z: 0 })
+    const settled = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic())
+    const moving = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic())
+    settled.sleep()
+    moving.setLinvel({ x: 1, y: 0, z: 0 }, true)
+
+    expect(bodyCanSyncSettledTransform(world, settled, 1, 1, false)).toBe(true)
+    expect(bodyCanSyncSettledTransform(world, moving, 1, 1, false)).toBe(false)
+    expect(bodyCanSyncSettledTransform(world, settled, 1, 1, true)).toBe(false)
+    world.free()
+  })
+
+  it.each<[CasePreset, boolean]>([
+    ['modern3', false],
+    ['wood3', false],
+    ['glass3', true]
+  ])('matches the visible side wall of %s in the collision scene', (preset, expectedCollision) => {
+    const world = new RAPIER.World({ x: 0, y: 0, z: 0 })
+    const displayItem = displayCaseItem(preset)
+    displayItem.physics.placementLocked = true
+    addPedestal(world, displayItem)
+
+    const probeItem = pedestalItem({ locked: true })
+    probeItem.transform.position = { x: 2.64, y: 1, z: 0 }
+    const probe = world.createRigidBody(createItemRigidBodyDescriptor(
+      probeItem,
+      { x: 0, y: 0, z: 0, w: 1 }
+    ))
+    world.createCollider(
+      RAPIER.ColliderDesc.cuboid(0.15, 0.15, 0.15).setCollisionGroups(itemCollisionGroups(probeItem)),
+      probe
+    )
+    world.step()
+
+    expect(bodyOverlapsCollisionScene(world, probe, undefined, true)).toBe(expectedCollision)
+    world.free()
+  })
+
   it('drops an unlocked built-in object onto the floor', () => {
     const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 })
     addFloor(world)
@@ -113,6 +191,23 @@ describe('item physics policy', () => {
     expect(top.translation().y).toBeLessThan(0.75)
     world.free()
   })
+
+  it.each<AcrylicCaseVariant>(['low', 'standard'])(
+    'lets the %s acrylic case bridge the open top frame of a freeform display case',
+    (variant) => {
+      const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 })
+      addFloor(world)
+      const displayItem = displayCaseItem()
+      const display = createBuiltInObject(displayItem)
+      const displayBody = addPedestal(world, displayItem)
+      const acrylic = addPedestal(world, acrylicCaseItem(variant, display.bounds.max.y + 0.5))
+
+      settle(world, 480)
+
+      expect(acrylic.translation().y - displayBody.translation().y).toBeCloseTo(display.bounds.max.y, 1)
+      world.free()
+    }
+  )
 
   it('keeps an environment collider even when item-to-item collision is disabled', () => {
     const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 })
@@ -166,6 +261,43 @@ describe('item physics policy', () => {
     addKinematicBox(world, pedestalItem(), 0.1)
 
     expect(bodyOverlapsCollisionScene(world, dragged, { x: 0, y: 0, z: 0 }, true)).toBe(true)
+    world.free()
+  })
+
+  it('resolves restored penetrations from later contents before moving their earlier support', () => {
+    const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 })
+    addFloor(world)
+    const supportItem = pedestalItem()
+    const contentItem = pedestalItem()
+    const support = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(0, 0.5, 0))
+    world.createCollider(
+      RAPIER.ColliderDesc.cuboid(1, 0.5, 1).setCollisionGroups(itemCollisionGroups(supportItem)),
+      support
+    )
+    const content = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(0, 0.8, 0))
+    world.createCollider(
+      RAPIER.ColliderDesc.cuboid(0.25, 0.25, 0.25).setCollisionGroups(itemCollisionGroups(contentItem)),
+      content
+    )
+
+    const resolution = resolveRestoredBodyOverlaps(world, [
+      { body: support, preservePosition: false },
+      { body: content, preservePosition: false }
+    ])
+
+    expect(resolution.unresolved.size).toBe(0)
+    expect(resolution.moved.has(content.handle)).toBe(true)
+    expect(resolution.moved.has(support.handle)).toBe(false)
+    expect(support.translation()).toMatchObject({ x: 0, y: 0.5, z: 0 })
+    expect(bodyOverlapsCollisionScene(world, content, { x: 0, y: 0, z: 0 }, true)).toBe(false)
+
+    settle(world)
+    expect(Math.abs(support.translation().x)).toBeLessThan(0.02)
+    expect(Math.abs(support.translation().z)).toBeLessThan(0.02)
+    expect(Math.abs(content.translation().x)).toBeLessThan(0.02)
+    expect(Math.abs(content.translation().z)).toBeLessThan(0.02)
+    expect(support.translation().y).toBeCloseTo(0.5, 1)
+    expect(content.translation().y).toBeCloseTo(1.25, 1)
     world.free()
   })
 

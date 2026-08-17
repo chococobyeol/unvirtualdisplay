@@ -43,6 +43,59 @@ describe('built-in scene objects', () => {
     expect(displayCase.bounds.max.y).toBeGreaterThan(2.8)
   })
 
+  it.each(['modern1', 'glass2', 'wood3'] as const)(
+    'keeps the top of %s open while matching its visible frame rails with colliders',
+    (preset) => {
+      const displayCase = createBuiltInObject(builtInItem('displayCase', {
+        type: 'displayCase',
+        casePreset: preset
+      }))
+      const topColliders = displayCase.colliders.filter((part) => (
+        Math.abs(part.position[1] + part.halfExtents[1] - displayCase.bounds.max.y) < 1e-6
+      ))
+
+      expect(topColliders).toHaveLength(2)
+      expect(topColliders.every((part) => part.halfExtents[0] > 2.5)).toBe(true)
+      expect(topColliders.every((part) => part.halfExtents[2] < 0.1)).toBe(true)
+      expect(topColliders.map((part) => part.position[2]).sort()).toEqual([-1.25, 1.25])
+    }
+  )
+
+  it.each(['modern3', 'wood2'] as const)(
+    'keeps the sides of %s physically open between the four visible posts',
+    (preset) => {
+      const displayCase = createBuiltInObject(builtInItem('displayCase', {
+        type: 'displayCase',
+        casePreset: preset
+      }))
+      const solidSideWalls = displayCase.colliders.filter((part) => (
+        part.halfExtents[0] <= 0.06 && part.halfExtents[2] > 1
+      ))
+      const cornerPosts = displayCase.colliders.filter((part) => (
+        part.halfExtents[0] <= 0.06 && part.halfExtents[2] <= 0.06 && part.halfExtents[1] > 0.5
+      ))
+
+      expect(solidSideWalls).toHaveLength(0)
+      expect(cornerPosts).toHaveLength(4)
+    }
+  )
+
+  it('gives the glass preset side collisions only where its glass panels are visible', () => {
+    const displayCase = createBuiltInObject(builtInItem('displayCase', {
+      type: 'displayCase',
+      casePreset: 'glass3'
+    }))
+    const glassSideWalls = displayCase.colliders.filter((part) => (
+      part.halfExtents[0] <= 0.06 && part.halfExtents[2] > 1
+    ))
+    const redundantPostColliders = displayCase.colliders.filter((part) => (
+      part.halfExtents[0] <= 0.06 && part.halfExtents[2] <= 0.06 && part.halfExtents[1] > 0.5
+    ))
+
+    expect(glassSideWalls).toHaveLength(2)
+    expect(redundantPostColliders).toHaveLength(0)
+  })
+
   it('keeps the primary display case aligned with the established shelf coordinates', () => {
     const primaryCase = createDisplayCaseObject('modern1')
 

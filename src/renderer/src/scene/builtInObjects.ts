@@ -106,11 +106,12 @@ export function createDisplayCaseObject(preset: CasePreset, normalizeToFloor = f
   addBox(root, backSize, backPosition, backMaterial, false)
   colliders.push(collider([5.28, layout.backHeight, 0.12], backPosition))
 
+  const shelfSize: BoxSize = [4.95, 0.1, 2.4]
+  const shelfColliderSize: BoxSize = [5.16, 0.1, 2.44]
   for (const shelfHeight of layout.shelfHeights) {
-    const shelfSize: BoxSize = [4.95, 0.1, 2.4]
     const shelfPosition: BoxPosition = [0, shelfHeight, 0]
     addBox(root, shelfSize, shelfPosition, shelfMaterial)
-    colliders.push(collider([5.16, 0.1, 2.44], shelfPosition))
+    colliders.push(collider(shelfColliderSize, shelfPosition))
   }
 
   if (style === 'glass') {
@@ -134,17 +135,30 @@ export function createDisplayCaseObject(preset: CasePreset, normalizeToFloor = f
     root.add(left, right)
   }
 
+  const postSize: BoxSize = [0.1, layout.frameHeight, 0.1]
   for (const x of [-2.64, 2.64]) {
-    addBox(root, [0.1, layout.frameHeight, 0.1], [x, layout.frameCenterY, -1.25], frameMaterial)
-    addBox(root, [0.1, layout.frameHeight, 0.1], [x, layout.frameCenterY, 1.25], frameMaterial)
+    for (const z of [-1.25, 1.25]) {
+      const postPosition: BoxPosition = [x, layout.frameCenterY, z]
+      addBox(root, postSize, postPosition, frameMaterial)
+      if (style !== 'glass') colliders.push(collider(postSize, postPosition))
+    }
   }
-  addBox(root, [5.38, 0.1, 0.1], [0, layout.topHeight, -1.25], frameMaterial)
-  addBox(root, [5.38, 0.1, 0.1], [0, layout.topHeight, 1.25], frameMaterial)
+  const topRailSize: BoxSize = [5.38, 0.1, 0.1]
+  for (const z of [-1.25, 1.25]) {
+    const topRailPosition: BoxPosition = [0, layout.topHeight, z]
+    addBox(root, topRailSize, topRailPosition, frameMaterial)
+    colliders.push(collider(topRailSize, topRailPosition))
+  }
 
-  colliders.push(
-    collider([0.1, layout.backHeight, 2.6], [-2.66, layout.backCenterY, 0]),
-    collider([0.1, layout.backHeight, 2.6], [2.66, layout.backCenterY, 0])
-  )
+  // Only the glass preset has visible side walls. Modern and wood presets are
+  // open between their corner posts, so a full-depth side collider there
+  // would behave like an invisible pane of glass.
+  if (style === 'glass') {
+    colliders.push(
+      collider([0.1, layout.backHeight, 2.6], [-2.66, layout.backCenterY, 0]),
+      collider([0.1, layout.backHeight, 2.6], [2.66, layout.backCenterY, 0])
+    )
+  }
   return finish(root, colliders, normalizeToFloor)
 }
 

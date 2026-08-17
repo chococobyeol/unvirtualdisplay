@@ -34,6 +34,7 @@ describe('ProjectStore', () => {
     expect(store.settings.onboardingComplete).toBe(false)
     expect(store.settings.alwaysOnTop).toBe(true)
     expect(store.settings.clickThrough).toBe(false)
+    expect(store.settings.displayVisible).toBe(true)
     expect((await store.listProjects()).map((entry) => entry.id)).toContain(project.id)
   })
 
@@ -135,6 +136,60 @@ describe('ProjectStore', () => {
     expect((await reopened.listProjects()).map((project) => project.id)).toEqual([first.id, third.id, second.id])
   })
 
+  it('reopens built-in structures with their exact saved transforms and physics settings', async () => {
+    const store = await createStore()
+    const project = await store.getActiveProject()
+    const acrylicCaseId = crypto.randomUUID()
+    const acrylicStepsId = crypto.randomUUID()
+    project.items.push(
+      {
+        id: acrylicCaseId,
+        name: 'Acrylic case',
+        kind: 'builtin',
+        format: 'object',
+        assetUrl: '',
+        relativePath: '',
+        visible: true,
+        selectionPassThrough: true,
+        builtin: { type: 'acrylicCase', acrylicCaseVariant: 'low' },
+        transform: {
+          position: { x: -0.7, y: 0.42, z: 0.35 },
+          rotation: { x: 0.02, y: -0.4, z: 0.01 },
+          scale: { x: 1.4, y: 1.6, z: 0.9 }
+        },
+        physics: { collision: true, preventToppling: false, placementLocked: false },
+        animation: { enabled: false, clipIndex: 0, loop: true, speed: 1 }
+      },
+      {
+        id: acrylicStepsId,
+        name: 'Acrylic steps',
+        kind: 'builtin',
+        format: 'object',
+        assetUrl: '',
+        relativePath: '',
+        visible: true,
+        selectionPassThrough: false,
+        builtin: { type: 'acrylicSteps', steps: 3 },
+        transform: {
+          position: { x: 0.25, y: 0.18, z: -0.2 },
+          rotation: { x: 0, y: 0.3, z: 0 },
+          scale: { x: 1.6, y: 1.1, z: 1.2 }
+        },
+        physics: { collision: true, preventToppling: true, placementLocked: false },
+        animation: { enabled: false, clipIndex: 0, loop: true, speed: 1 }
+      }
+    )
+    project.revision += 1
+    await store.saveProject(project)
+
+    const reopened = new ProjectStore(temporaryRoots[0], 'ko-KR')
+    await reopened.initialize()
+    const restored = await reopened.getActiveProject()
+
+    expect(restored.items.find((item) => item.id === acrylicCaseId)).toEqual(project.items[0])
+    expect(restored.items.find((item) => item.id === acrylicStepsId)).toEqual(project.items[1])
+  })
+
   it('keeps the newest revision when save requests arrive out of order', async () => {
     const store = await createStore()
     const original = await store.getActiveProject()
@@ -150,6 +205,147 @@ describe('ProjectStore', () => {
     const saved = await store.getActiveProject()
     expect(saved.revision).toBe(2)
     expect(saved.name).toBe('Newest edit')
+  })
+
+  it('merges simultaneous updates to different project fields', async () => {
+    const store = await createStore()
+    const project = await store.getActiveProject()
+
+    await Promise.all([
+      store.updateProject(project.id, { lighting: { ...project.lighting, intensity: 1.75 } }),
+      store.updateProject(project.id, { camera: { ...project.camera, position: { ...project.camera.position, x: 9 } } })
+    ])
+
+    const saved = await store.getActiveProject()
+    expect(saved.lighting.intensity).toBe(1.75)
+    expect(saved.camera.position.x).toBe(9)
+    expect(saved.revision).toBe(2)
+  })
+
+  it('persists widget visibility in app settings', async () => {
+    const store = await createStore()
+    await store.updateSettings({ displayVisible: false })
+
+    const reopened = new ProjectStore(temporaryRoots[0], 'ko-KR')
+    await reopened.initialize()
+
+    expect(reopened.settings.displayVisible).toBe(false)
+  })
+
+  it('removes asset groups when their item or background reference is removed', async () => {
+    const store = await createStore()
+    const project = await store.getActiveProject()
+    const modelSource = join(temporaryRoots[0], 'orphan.obj')
+    await writeFile(modelSource, 'o Orphan\nv 0 0 0\n', 'utf8')
+    const [model] = await store.importFiles(project.id, [modelSource])
+    const item = {
+      id: crypto.randomUUID(),
+      name: model.name,
+      kind: 'model' as const,
+      format: 'obj',
+      assetUrl: model.assetUrl,
+      relativePath: model.relativePath,
+      transform: {
+        position: { x: 0, y: 0, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 }
+      },
+      physics: { collision: true, preventToppling: true, placementLocked: false },
+      animation: { enabled: false, clipIndex: 0, loop: true, speed: 1 }
+    }
+    await store.updateProject(project.id, { items: [item] })
+    const modelPath = store.resolveAssetPath(project.id, model.relativePath)
+    await expect(readFile(modelPath)).resolves.toBeTruthy()
+
+    await store.updateProject(project.id, { items: [] })
+    await expect(readFile(modelPath)).rejects.toThrow()
+
+    const backgroundSource = join(temporaryRoots[0], 'orphan-background.png')
+    await writeFile(backgroundSource, new Uint8Array([137, 80, 78, 71]))
+    const [background] = await store.importFiles(project.id, [backgroundSource])
+    const backgroundPath = store.resolveAssetPath(project.id, background.relativePath)
+    await store.updateProject(project.id, {
+      background: {
+        mode: 'image',
+        color: '#11100f',
+        fit: 'cover',
+        imageUrl: background.assetUrl,
+        relativePath: background.relativePath
+      }
+    })
+    await store.updateProject(project.id, { background: { mode: 'transparent', color: '#11100f', fit: 'cover' } })
+    await expect(readFile(backgroundPath)).rejects.toThrow()
+  })
+
+  it('protects a freshly imported asset until its project update arrives', async () => {
+    const store = await createStore()
+    const project = await store.getActiveProject()
+    const imageSource = join(temporaryRoots[0], 'pending.png')
+    await writeFile(imageSource, new Uint8Array([137, 80, 78, 71]))
+    const [image] = await store.importFiles(project.id, [imageSource])
+    const copiedPath = store.resolveAssetPath(project.id, image.relativePath)
+
+    await store.updateProject(project.id, { name: 'Renamed while importing' })
+
+    await expect(readFile(copiedPath)).resolves.toBeTruthy()
+  })
+
+  it('keeps a shared asset group when clearing items leaves a background reference', async () => {
+    const store = await createStore()
+    const project = await store.getActiveProject()
+    const modelSource = join(temporaryRoots[0], 'shared.gltf')
+    const textureSource = join(temporaryRoots[0], 'shared.png')
+    await writeFile(modelSource, JSON.stringify({ asset: { version: '2.0' }, images: [{ uri: 'shared.png' }] }), 'utf8')
+    await writeFile(textureSource, new Uint8Array([137, 80, 78, 71]))
+    const [model] = await store.importFiles(project.id, [modelSource])
+    const group = model.relativePath.split('/')[0]
+    const textureRelativePath = `${group}/shared.png`
+
+    await store.updateProject(project.id, {
+      items: [{
+        id: crypto.randomUUID(),
+        name: model.name,
+        kind: 'model',
+        format: model.extension,
+        assetUrl: model.assetUrl,
+        relativePath: model.relativePath,
+        transform: {
+          position: { x: 0, y: 0, z: 0 },
+          rotation: { x: 0, y: 0, z: 0 },
+          scale: { x: 1, y: 1, z: 1 }
+        },
+        physics: { collision: true, preventToppling: true, placementLocked: false },
+        animation: { enabled: false, clipIndex: 0, loop: true, speed: 1 }
+      }],
+      background: {
+        mode: 'image',
+        color: '#11100f',
+        fit: 'cover',
+        imageUrl: model.assetUrl.replace(/shared\.gltf$/, 'shared.png'),
+        relativePath: textureRelativePath
+      }
+    })
+
+    const cleared = await store.resetProject(project.id, 'items')
+
+    expect(cleared.project.items).toEqual([])
+    expect(cleared.project.background.relativePath).toBe(textureRelativePath)
+    await expect(readFile(store.resolveAssetPath(project.id, textureRelativePath))).resolves.toBeTruthy()
+  })
+
+  it('removes abandoned import groups when the store is reopened', async () => {
+    const store = await createStore()
+    const project = await store.getActiveProject()
+    const imageSource = join(temporaryRoots[0], 'abandoned.png')
+    await writeFile(imageSource, new Uint8Array([137, 80, 78, 71]))
+    const [image] = await store.importFiles(project.id, [imageSource])
+    const copiedPath = store.resolveAssetPath(project.id, image.relativePath)
+    await expect(readFile(copiedPath)).resolves.toBeTruthy()
+
+    const reopened = new ProjectStore(temporaryRoots[0], 'ko-KR')
+    await reopened.initialize()
+
+    await expect(readFile(copiedPath)).rejects.toThrow()
   })
 
   it('clears items and fully resets a display while removing copied assets', async () => {

@@ -45,6 +45,43 @@ describe('pickSceneSelection', () => {
     expect(pickSceneSelection(centerRay(), [item], caseLayer)).toBe('figure-1')
   })
 
+  it('skips any item marked for selection pass-through and selects the item behind it', () => {
+    const front = new THREE.Group()
+    front.userData.itemId = 'acrylic-case'
+    front.userData.selectionPassThrough = true
+    const frontMesh = new THREE.Mesh(new THREE.BoxGeometry(3, 3, 0.1))
+    frontMesh.position.z = 2
+    front.add(frontMesh)
+    front.updateMatrixWorld(true)
+
+    const behind = new THREE.Group()
+    behind.userData.itemId = 'figure-inside'
+    behind.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1)))
+    behind.updateMatrixWorld(true)
+
+    expect(pickSceneSelection(centerRay(), [front, behind], null)).toBe('figure-inside')
+  })
+
+  it('applies selection pass-through to opaque models and images as the same common behavior', () => {
+    const passThroughItem = new THREE.Group()
+    passThroughItem.userData.itemId = 'opaque-item'
+    passThroughItem.userData.selectionPassThrough = true
+    passThroughItem.add(new THREE.Mesh(new THREE.BoxGeometry(2, 2, 1)))
+    passThroughItem.updateMatrixWorld(true)
+
+    expect(pickSceneSelection(centerRay(), [passThroughItem], null)).toBeNull()
+  })
+
+  it('restores normal scene selection as soon as pass-through is disabled', () => {
+    const item = new THREE.Group()
+    item.userData.itemId = 'selectable-again'
+    item.userData.selectionPassThrough = false
+    item.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1)))
+    item.updateMatrixWorld(true)
+
+    expect(pickSceneSelection(centerRay(), [item], null)).toBe('selectable-again')
+  })
+
   it('selects an exhibit through a transparent case surface', () => {
     const item = new THREE.Group()
     item.userData.itemId = 'figure-1'
