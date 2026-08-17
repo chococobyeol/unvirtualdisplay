@@ -1,5 +1,37 @@
 export type Language = 'ko' | 'en' | 'ja' | 'zh-Hans'
-export type CasePreset = 'gallery' | 'glass' | 'warm'
+export const CASE_PRESETS = [
+  'modern1', 'modern2', 'modern3',
+  'glass1', 'glass2', 'glass3',
+  'wood1', 'wood2', 'wood3'
+] as const
+export type CasePreset = typeof CASE_PRESETS[number]
+export type CaseStyle = 'modern' | 'glass' | 'wood'
+export type CaseTier = 1 | 2 | 3
+
+export const CASE_PRESET_META: Record<CasePreset, { style: CaseStyle, tier: CaseTier }> = {
+  modern1: { style: 'modern', tier: 1 },
+  modern2: { style: 'modern', tier: 2 },
+  modern3: { style: 'modern', tier: 3 },
+  glass1: { style: 'glass', tier: 1 },
+  glass2: { style: 'glass', tier: 2 },
+  glass3: { style: 'glass', tier: 3 },
+  wood1: { style: 'wood', tier: 1 },
+  wood2: { style: 'wood', tier: 2 },
+  wood3: { style: 'wood', tier: 3 }
+}
+
+export function isCasePreset(value: unknown): value is CasePreset {
+  return typeof value === 'string' && CASE_PRESETS.includes(value as CasePreset)
+}
+
+export function normalizeCasePreset(value: unknown): CasePreset {
+  if (isCasePreset(value)) return value
+  if (value === 'oneTier') return 'modern1'
+  if (value === 'twoTier') return 'modern2'
+  if (value === 'glass') return 'glass3'
+  if (value === 'warm') return 'wood3'
+  return 'modern3'
+}
 export type QualityPreset = 'low' | 'balanced' | 'high'
 export type TransformMode = 'translate' | 'rotate' | 'scale'
 export type DisplayItemKind = 'model' | 'image'

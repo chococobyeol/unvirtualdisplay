@@ -122,7 +122,7 @@ describe('ProjectStore', () => {
     await writeFile(backgroundSource, new Uint8Array([137, 80, 78, 71]))
     const [background] = await store.importFiles(project.id, [backgroundSource])
     project.revision = 1
-    project.casePreset = 'warm'
+    project.casePreset = 'wood3'
     project.caseVisible = false
     project.background = {
       mode: 'image',
@@ -152,7 +152,7 @@ describe('ProjectStore', () => {
 
     const cleared = await store.resetProject(project.id, 'items')
     expect(cleared.project.items).toEqual([])
-    expect(cleared.project.casePreset).toBe('warm')
+    expect(cleared.project.casePreset).toBe('wood3')
     expect(cleared.project.caseVisible).toBe(false)
     expect(cleared.project.background.mode).toBe('image')
     await expect(readFile(copiedPath)).rejects.toThrow()
@@ -163,7 +163,7 @@ describe('ProjectStore', () => {
     cleared.project.lighting.intensity = 2
     await store.saveProject(cleared.project)
     const reset = await store.resetProject(project.id, 'all')
-    expect(reset.project.casePreset).toBe('gallery')
+    expect(reset.project.casePreset).toBe('modern3')
     expect(reset.project.caseVisible).toBe(true)
     expect(reset.project.camera.position.x).toBe(4.8)
     expect(reset.project.lighting.intensity).toBe(1)
@@ -189,7 +189,7 @@ describe('ProjectStore', () => {
     expect(reset.projects).toHaveLength(1)
     expect(reset.project.id).not.toBe(original.id)
     expect(reset.project.items).toEqual([])
-    expect(reset.project.casePreset).toBe('gallery')
+    expect(reset.project.casePreset).toBe('modern3')
     expect(reset.activeProjectId).toBe(reset.project.id)
     expect(store.settings.quality).toBe('high')
     expect(store.settings.alwaysOnTop).toBe(true)

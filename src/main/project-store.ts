@@ -11,7 +11,7 @@ import type {
   ProjectResetScope,
   ProjectSummary
 } from '../shared/types'
-import { createDefaultCameraSettings, createDefaultDisplayTransform, createDefaultLightingSettings } from '../shared/types'
+import { createDefaultCameraSettings, createDefaultDisplayTransform, createDefaultLightingSettings, normalizeCasePreset } from '../shared/types'
 
 interface StoreIndex {
   activeProjectId: string
@@ -40,7 +40,7 @@ function createProject(name = 'My display'): DisplayProject {
     revision: 0,
     id: randomUUID(),
     name,
-    casePreset: 'gallery',
+    casePreset: 'modern3',
     caseVisible: true,
     displayTransform: createDefaultDisplayTransform(),
     items: [],
@@ -69,6 +69,7 @@ function normalizeProject(project: DisplayProject): DisplayProject {
     ...project,
     schemaVersion: 1,
     revision: Number.isSafeInteger(project.revision) && project.revision >= 0 ? project.revision : 0,
+    casePreset: normalizeCasePreset(project.casePreset),
     caseVisible: project.caseVisible !== false,
     displayTransform,
     lighting: {

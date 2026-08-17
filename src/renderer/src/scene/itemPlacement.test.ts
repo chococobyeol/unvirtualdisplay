@@ -15,6 +15,22 @@ const itemBounds = new THREE.Box3(
 )
 
 describe('findOpenImportPosition', () => {
+  it('places new items on the base of a single-tier display', () => {
+    const position = findOpenImportPosition(itemBounds, transform, [], 'modern1')
+
+    expect(position.x).toBe(0)
+    expect(position.y).toBe(0)
+    expect(position.z).toBe(0)
+  })
+
+  it('uses the upper shelf first in a two-tier display', () => {
+    const position = findOpenImportPosition(itemBounds, transform, [], 'modern2')
+
+    expect(position.x).toBe(0)
+    expect(position.y).toBeCloseTo(1.47)
+    expect(position.z).toBe(0)
+  })
+
   it('uses the center of the top shelf when it is empty', () => {
     const position = findOpenImportPosition(itemBounds, transform, [])
 

@@ -1,11 +1,11 @@
 import * as THREE from 'three'
-import type { TransformState } from '../../../shared/types'
+import type { CasePreset, TransformState } from '../../../shared/types'
+import { getCaseLayout } from './caseLayout'
 
 const CASE_MIN_X = -2.48
 const CASE_MAX_X = 2.48
 const CASE_MIN_Z = -1.12
 const CASE_MAX_Z = 1.12
-const SHELF_SURFACES = [2.83, 1.47, 0]
 const FALLBACK_FLOOR_SURFACE = -0.18
 const RECOVERY_FLOOR_LIMIT = -0.28
 const PLACEMENT_STEP = 0.2
@@ -82,7 +82,8 @@ function isClear(candidate: THREE.Box3, occupied: THREE.Box3[]): boolean {
 export function findOpenImportPosition(
   localBounds: THREE.Box3,
   transform: TransformState,
-  occupied: THREE.Box3[]
+  occupied: THREE.Box3[],
+  casePreset: CasePreset = 'modern3'
 ): THREE.Vector3 {
   const bounds = transformedItemBounds(localBounds, {
     ...transform,
@@ -91,7 +92,7 @@ export function findOpenImportPosition(
   const xCandidates = centeredCandidates(CASE_MIN_X - bounds.min.x, CASE_MAX_X - bounds.max.x)
   const zCandidates = centeredCandidates(CASE_MIN_Z - bounds.min.z, CASE_MAX_Z - bounds.max.z)
 
-  for (const surface of SHELF_SURFACES) {
+  for (const surface of getCaseLayout(casePreset).placementSurfaces) {
     const y = surface - bounds.min.y
     for (const z of zCandidates) {
       for (const x of xCandidates) {

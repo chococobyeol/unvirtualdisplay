@@ -16,9 +16,10 @@ import type {
   TransformMode,
   TransformState
 } from '../../../shared/types'
-import { createDefaultDisplayTransform, DISPLAY_CASE_SELECTION_ID } from '../../../shared/types'
+import { CASE_PRESET_META, createDefaultDisplayTransform, DISPLAY_CASE_SELECTION_ID } from '../../../shared/types'
 import { cameraSettingsEqual, shouldApplySyncedCamera } from '../../../shared/camera'
 import { findOpenImportPosition, fitImportedItemScale, isPlacementBelowSafetyFloor } from './itemPlacement'
+import { getCaseLayout } from './caseLayout'
 import { pickSceneSelection, transformAxisAtPointer } from './sceneSelection'
 
 interface SceneCallbacks {
@@ -779,15 +780,17 @@ export class SceneRuntime {
       for (const body of this.staticBodies.splice(0)) this.world.removeRigidBody(body)
     }
 
-    const palette = preset === 'warm'
+    const layout = getCaseLayout(preset)
+    const style = CASE_PRESET_META[preset].style
+    const palette = style === 'wood'
       ? { base: 0x6b4932, back: 0x493326, frame: 0x2f231c, shelf: 0x8a6244 }
-      : preset === 'glass'
+      : style === 'glass'
         ? { base: 0x272a2c, back: 0x9eaaa8, frame: 0x27292b, shelf: 0x494f51 }
         : { base: 0xd7d0c3, back: 0xc6c0b4, frame: 0x45413d, shelf: 0xb4aea3 }
 
-    const baseMaterial = new THREE.MeshStandardMaterial({ color: palette.base, roughness: preset === 'warm' ? 0.72 : 0.48, metalness: 0.03 })
+    const baseMaterial = new THREE.MeshStandardMaterial({ color: palette.base, roughness: style === 'wood' ? 0.72 : 0.48, metalness: 0.03 })
     const backMaterial = new THREE.MeshStandardMaterial({ color: palette.back, roughness: 0.78 })
-    const shelfMaterial = new THREE.MeshStandardMaterial({ color: palette.shelf, roughness: preset === 'warm' ? 0.65 : 0.42, metalness: preset === 'glass' ? 0.25 : 0.02 })
+    const shelfMaterial = new THREE.MeshStandardMaterial({ color: palette.shelf, roughness: style === 'wood' ? 0.65 : 0.42, metalness: style === 'glass' ? 0.25 : 0.02 })
     const frameMaterial = new THREE.MeshStandardMaterial({ color: palette.frame, roughness: 0.42, metalness: 0.35 })
 
     const addBox = (size: [number, number, number], position: [number, number, number], material: THREE.Material, shadows = true): THREE.Mesh => {
@@ -800,29 +803,30 @@ export class SceneRuntime {
     }
 
     addBox([5.4, 0.18, 2.7], [0, -0.09, 0], baseMaterial)
-    const backPanel = addBox([5.25, 3.9, 0.12], [0, 1.88, -1.29], backMaterial)
+    const backPanel = addBox([5.25, layout.backHeight, 0.12], [0, layout.backCenterY, -1.29], backMaterial)
     // The rear panel only needs to receive shadows. Excluding it from the
     // shadow map prevents its two close faces from shadowing each other.
     backPanel.castShadow = false
-    addBox([4.95, 0.1, 2.4], [0, 1.42, 0], shelfMaterial)
-    addBox([4.95, 0.1, 2.4], [0, 2.78, 0], shelfMaterial)
+    for (const shelfHeight of layout.shelfHeights) {
+      addBox([4.95, 0.1, 2.4], [0, shelfHeight, 0], shelfMaterial)
+    }
 
-    if (preset === 'glass') {
+    if (style === 'glass') {
       const glass = new THREE.MeshPhysicalMaterial({ color: 0xdceeed, transparent: true, opacity: 0.13, roughness: 0.08, metalness: 0, transmission: 0.25, depthWrite: false, side: THREE.DoubleSide })
-      const left = new THREE.Mesh(new THREE.PlaneGeometry(2.7, 3.9), glass)
+      const left = new THREE.Mesh(new THREE.PlaneGeometry(2.7, layout.backHeight), glass)
       left.rotation.y = Math.PI / 2
-      left.position.set(-2.64, 1.88, 0)
+      left.position.set(-2.64, layout.backCenterY, 0)
       const right = left.clone()
       right.position.x = 2.64
       this.caseLayer.add(left, right)
     }
 
     for (const x of [-2.64, 2.64]) {
-      addBox([0.1, 4.05, 0.1], [x, 1.92, -1.25], frameMaterial)
-      addBox([0.1, 4.05, 0.1], [x, 1.92, 1.25], frameMaterial)
+      addBox([0.1, layout.frameHeight, 0.1], [x, layout.frameCenterY, -1.25], frameMaterial)
+      addBox([0.1, layout.frameHeight, 0.1], [x, layout.frameCenterY, 1.25], frameMaterial)
     }
-    addBox([5.38, 0.1, 0.1], [0, 3.93, -1.25], frameMaterial)
-    addBox([5.38, 0.1, 0.1], [0, 3.93, 1.25], frameMaterial)
+    addBox([5.38, 0.1, 0.1], [0, layout.topHeight, -1.25], frameMaterial)
+    addBox([5.38, 0.1, 0.1], [0, layout.topHeight, 1.25], frameMaterial)
 
     if (this.variant === 'editor') {
       const grid = new THREE.GridHelper(5.2, 20, 0x6f6558, 0x403b35)
@@ -833,14 +837,17 @@ export class SceneRuntime {
     }
 
     this.addStaticCollider([2.7, 0.09, 1.35], [0, -0.09, 0])
-    this.addStaticCollider([2.58, 0.05, 1.22], [0, 1.42, 0])
-    this.addStaticCollider([2.58, 0.05, 1.22], [0, 2.78, 0])
-    this.addStaticCollider([2.64, 1.95, 0.06], [0, 1.88, -1.29])
-    this.addStaticCollider([0.05, 1.95, 1.3], [-2.66, 1.88, 0])
-    this.addStaticCollider([0.05, 1.95, 1.3], [2.66, 1.88, 0])
+    for (const shelfHeight of layout.shelfHeights) {
+      this.addStaticCollider([2.58, 0.05, 1.22], [0, shelfHeight, 0])
+    }
+    const wallHalfHeight = layout.backHeight / 2
+    this.addStaticCollider([2.64, wallHalfHeight, 0.06], [0, layout.backCenterY, -1.29])
+    this.addStaticCollider([0.05, wallHalfHeight, 1.3], [-2.66, layout.backCenterY, 0])
+    this.addStaticCollider([0.05, wallHalfHeight, 1.3], [2.66, layout.backCenterY, 0])
     // A wide invisible floor sits directly beneath the case base so items that
     // fall over an edge settle below the display instead of falling forever.
     this.addStaticCollider([24, 0.08, 24], [0, -0.26, 0])
+    for (const runtime of this.items.values()) runtime.body?.wakeUp()
     this.settlementReported = false
   }
 
@@ -894,7 +901,7 @@ export class SceneRuntime {
           runtime.root.updateMatrix()
           return runtime.bounds.clone().applyMatrix4(runtime.root.matrix)
         })
-      const position = findOpenImportPosition(loaded.bounds, placedItem.transform, occupied)
+      const position = findOpenImportPosition(loaded.bounds, placedItem.transform, occupied, this.project?.casePreset ?? 'modern3')
       placedItem.transform.position = { x: position.x, y: position.y, z: position.z }
       const localItem = this.project?.items.find((candidate) => candidate.id === item.id)
       if (localItem) localItem.transform = structuredClone(placedItem.transform)
@@ -1311,7 +1318,7 @@ export class SceneRuntime {
         candidate.root.updateMatrix()
         return candidate.bounds.clone().applyMatrix4(candidate.root.matrix)
       })
-    const position = findOpenImportPosition(runtime.bounds, transform, occupied)
+    const position = findOpenImportPosition(runtime.bounds, transform, occupied, this.project?.casePreset ?? 'modern3')
     runtime.root.position.copy(position)
     transform.position = { x: position.x, y: position.y, z: position.z }
     runtime.snapshot.transform = structuredClone(transform)

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent } from 'react'
+import * as THREE from 'three'
 import {
   Box,
   Camera,
@@ -40,15 +41,21 @@ import type {
   TransformMode,
   Vec3
 } from '../../../shared/types'
-import { createDefaultCameraSettings, DISPLAY_CASE_SELECTION_ID } from '../../../shared/types'
-import galleryCasePreview from '../assets/case-previews/gallery.jpg'
-import glassCasePreview from '../assets/case-previews/glass.jpg'
-import warmCasePreview from '../assets/case-previews/warm.jpg'
+import { CASE_PRESETS, createDefaultCameraSettings, DISPLAY_CASE_SELECTION_ID } from '../../../shared/types'
+import glassOneCasePreview from '../assets/case-previews/glass-one-tier.jpg'
+import glassThreeCasePreview from '../assets/case-previews/glass-three-tier.jpg'
+import glassTwoCasePreview from '../assets/case-previews/glass-two-tier.jpg'
+import modernOneCasePreview from '../assets/case-previews/modern-one-tier.jpg'
+import modernThreeCasePreview from '../assets/case-previews/modern-three-tier.jpg'
+import modernTwoCasePreview from '../assets/case-previews/modern-two-tier.jpg'
+import woodOneCasePreview from '../assets/case-previews/wood-one-tier.jpg'
+import woodThreeCasePreview from '../assets/case-previews/wood-three-tier.jpg'
+import woodTwoCasePreview from '../assets/case-previews/wood-two-tier.jpg'
 import { reorderById, type ReorderPlacement } from '../reorder'
+import { getCaseLayout } from '../scene/caseLayout'
 import { useAppStore } from '../store'
 import { SceneView, type SceneViewHandle } from './SceneView'
 
-const CASES: CasePreset[] = ['gallery', 'glass', 'warm']
 const LANGUAGES: { value: Language; label: string }[] = [
   { value: 'ko', label: '한국어' },
   { value: 'en', label: 'English' },
@@ -216,9 +223,15 @@ function DisplayFileMenu(): React.JSX.Element {
 }
 
 const CASE_PREVIEW_IMAGES: Record<CasePreset, string> = {
-  gallery: galleryCasePreview,
-  glass: glassCasePreview,
-  warm: warmCasePreview
+  modern1: modernOneCasePreview,
+  modern2: modernTwoCasePreview,
+  modern3: modernThreeCasePreview,
+  glass1: glassOneCasePreview,
+  glass2: glassTwoCasePreview,
+  glass3: glassThreeCasePreview,
+  wood1: woodOneCasePreview,
+  wood2: woodTwoCasePreview,
+  wood3: woodThreeCasePreview
 }
 
 function CasePresetPreview({ preset }: { preset: CasePreset }): React.JSX.Element {
@@ -299,7 +312,7 @@ function CasePresetControl({
       {open && <div className="case-picker-popover" ref={popoverRef}>
         <strong>{label}</strong>
         <div className="case-picker-grid" role="listbox" aria-label={label} onKeyDown={moveFocus}>
-          {CASES.map((preset) => <button
+          {CASE_PRESETS.map((preset) => <button
             key={preset}
             type="button"
             className="case-preset-card"
@@ -1195,10 +1208,32 @@ export function EditorApp(): React.JSX.Element | null {
 
   if (!project || !settings) return null
 
-  const changeCase = (casePreset: CasePreset): void => mutate((draft) => { draft.casePreset = casePreset })
+  const changeCase = (casePreset: CasePreset): void => mutate((draft) => {
+    if (draft.casePreset === casePreset) return
+    const previousLayout = getCaseLayout(draft.casePreset)
+    const nextLayout = getCaseLayout(casePreset)
+    const localOffset = (nextLayout.topHeight - previousLayout.topHeight) / 2 * draft.displayTransform.scale.y
+    const rotation = draft.displayTransform.rotation
+    const offset = new THREE.Vector3(0, localOffset, 0).applyEuler(new THREE.Euler(rotation.x, rotation.y, rotation.z))
+    draft.camera.position.x += offset.x
+    draft.camera.position.y += offset.y
+    draft.camera.position.z += offset.z
+    draft.camera.target.x += offset.x
+    draft.camera.target.y += offset.y
+    draft.camera.target.z += offset.z
+    draft.casePreset = casePreset
+  })
   const changeLighting = (value: number): void => mutate((draft) => { draft.lighting.intensity = value }, false)
   const resetCamera = (): void => {
-    mutate((draft) => { draft.camera = createDefaultCameraSettings() })
+    mutate((draft) => {
+      const camera = createDefaultCameraSettings()
+      const galleryHeight = getCaseLayout('modern3').topHeight
+      const caseHeight = getCaseLayout(draft.casePreset).topHeight
+      const caseCenterOffset = (caseHeight - galleryHeight) / 2
+      camera.position.y += caseCenterOffset
+      camera.target.y += caseCenterOffset
+      draft.camera = camera
+    })
     setCameraResetKey((key) => key + 1)
   }
   const saveCapture = (): void => {

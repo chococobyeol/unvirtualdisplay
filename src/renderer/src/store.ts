@@ -11,7 +11,7 @@ import type {
   TransformMode,
   TransformState
 } from '../../shared/types'
-import { createDefaultDisplayTransform, createDefaultLightingSettings, DISPLAY_CASE_SELECTION_ID } from '../../shared/types'
+import { createDefaultDisplayTransform, createDefaultLightingSettings, DISPLAY_CASE_SELECTION_ID, normalizeCasePreset } from '../../shared/types'
 import { setLanguage } from './i18n'
 
 interface AppState {
@@ -98,6 +98,7 @@ function withDisplayDefaults(project: DisplayProject): DisplayProject {
   const lighting = project.lighting ?? defaultLighting
   return {
     ...project,
+    casePreset: normalizeCasePreset(project.casePreset),
     caseVisible: project.caseVisible !== false,
     displayTransform: project.displayTransform ?? createDefaultDisplayTransform(),
     lighting: {
