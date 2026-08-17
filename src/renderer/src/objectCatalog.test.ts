@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CASE_PRESETS } from '../../shared/types'
+import { SHELF_CASE_PRESETS } from '../../shared/types'
 import {
   createCatalogItem,
   entriesForCategory,
@@ -10,21 +10,21 @@ import {
 describe('object catalog', () => {
   it('uses the agreed categories in a stable order', () => {
     expect(OBJECT_LIBRARY_CATEGORIES).toEqual([
-      'all', 'displayCases', 'acrylicCases', 'risers', 'shelvesParts'
+      'all', 'displayCases', 'risers', 'shelvesParts'
     ])
   })
 
-  it('offers every existing display case as its own card', () => {
+  it('keeps shelving and acrylic cases together in one display-case category', () => {
     const cases = entriesForCategory('displayCases')
+    const shelving = cases.filter((entry) => entry.group === 'shelfCases')
+    const acrylic = cases.filter((entry) => entry.group === 'acrylicCases')
 
-    expect(cases).toHaveLength(9)
-    expect(cases.map((entry) => entry.builtin.casePreset)).toEqual(CASE_PRESETS.filter((preset) => preset !== 'custom'))
+    expect(cases).toHaveLength(12)
+    expect(shelving.map((entry) => entry.builtin.casePreset)).toEqual(SHELF_CASE_PRESETS)
+    expect(acrylic.map((entry) => entry.builtin.acrylicCaseVariant)).toEqual(['low', 'standard', 'tall'])
   })
 
-  it('offers the visible case and step variants directly in the library', () => {
-    expect(entriesForCategory('acrylicCases').map((entry) => entry.builtin.acrylicCaseVariant)).toEqual([
-      'low', 'standard', 'tall'
-    ])
+  it('offers all visible step variants directly in the library', () => {
     expect(entriesForCategory('risers').filter((entry) => entry.builtin.type === 'acrylicSteps').map((entry) => entry.builtin.steps)).toEqual([
       2, 3, 4, 5
     ])

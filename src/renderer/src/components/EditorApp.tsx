@@ -44,7 +44,12 @@ import type {
   TransformMode,
   Vec3
 } from '../../../shared/types'
-import { CASE_PRESETS, createDefaultCameraSettings, DISPLAY_CASE_SELECTION_ID } from '../../../shared/types'
+import {
+  ACRYLIC_CASE_PRESETS,
+  createDefaultCameraSettings,
+  DISPLAY_CASE_SELECTION_ID,
+  SHELF_CASE_PRESETS
+} from '../../../shared/types'
 import glassOneCasePreview from '../assets/case-previews/glass-one-tier.jpg'
 import glassThreeCasePreview from '../assets/case-previews/glass-three-tier.jpg'
 import glassTwoCasePreview from '../assets/case-previews/glass-two-tier.jpg'
@@ -69,6 +74,7 @@ import {
   entriesForCategory,
   OBJECT_CATALOG,
   OBJECT_LIBRARY_CATEGORIES,
+  type ObjectCatalogGroup,
   type ObjectLibraryCategory
 } from '../objectCatalog'
 import { reorderById, type ReorderPlacement } from '../reorder'
@@ -252,15 +258,22 @@ const CASE_PREVIEW_IMAGES: Partial<Record<CasePreset, string>> = {
   glass3: glassThreeCasePreview,
   wood1: woodOneCasePreview,
   wood2: woodTwoCasePreview,
-  wood3: woodThreeCasePreview
+  wood3: woodThreeCasePreview,
+  acrylicCaseLow: acrylicCaseLowPreview,
+  acrylicCaseStandard: acrylicCaseStandardPreview,
+  acrylicCaseTall: acrylicCaseTallPreview
 }
 
 const OBJECT_CATEGORY_KEYS: Record<ObjectLibraryCategory, string> = {
   all: 'objectCategoryAll',
   displayCases: 'objectCategoryDisplayCases',
-  acrylicCases: 'objectCategoryAcrylicCases',
   risers: 'objectCategoryRisers',
   shelvesParts: 'objectCategoryShelvesParts'
+}
+
+const OBJECT_GROUP_KEYS: Record<ObjectCatalogGroup, string> = {
+  shelfCases: 'caseGroupShelf',
+  acrylicCases: 'caseGroupAcrylic'
 }
 
 const OBJECT_CATALOG_PREVIEWS: Record<string, string> = {
@@ -295,11 +308,15 @@ function CasePresetPreview({ preset }: { preset: CasePreset }): React.JSX.Elemen
 function CasePresetControl({
   value,
   label,
+  shelfGroupLabel,
+  acrylicGroupLabel,
   getName,
   onChange
 }: {
   value: CasePreset
   label: string
+  shelfGroupLabel: string
+  acrylicGroupLabel: string
   getName: (preset: CasePreset) => string
   onChange: (preset: CasePreset) => void
 }): React.JSX.Element {
@@ -347,6 +364,23 @@ function CasePresetControl({
     cards[next]?.focus()
   }
 
+  const renderPresetCard = (preset: CasePreset): React.JSX.Element => <button
+    key={preset}
+    type="button"
+    className={`case-preset-card${preset === 'custom' ? ' custom' : ''}`}
+    role="option"
+    aria-selected={value === preset}
+    title={getName(preset)}
+    onClick={() => {
+      if (preset !== value) onChange(preset)
+      setOpen(false)
+      window.requestAnimationFrame(() => triggerRef.current?.focus())
+    }}
+  >
+    <CasePresetPreview preset={preset} />
+    <span>{getName(preset)}</span>
+  </button>
+
   return (
     <div className="case-picker" ref={controlRef}>
       <span className="case-picker-label">{label}</span>
@@ -365,23 +399,20 @@ function CasePresetControl({
       </button>
       {open && <div className="case-picker-popover" ref={popoverRef}>
         <strong>{label}</strong>
-        <div className="case-picker-grid" role="listbox" aria-label={label} onKeyDown={moveFocus}>
-          {CASE_PRESETS.map((preset) => <button
-            key={preset}
-            type="button"
-            className={`case-preset-card${preset === 'custom' ? ' custom' : ''}`}
-            role="option"
-            aria-selected={value === preset}
-            title={getName(preset)}
-            onClick={() => {
-              if (preset !== value) onChange(preset)
-              setOpen(false)
-              window.requestAnimationFrame(() => triggerRef.current?.focus())
-            }}
-          >
-            <CasePresetPreview preset={preset} />
-            <span>{getName(preset)}</span>
-          </button>)}
+        <div className="case-picker-options" role="listbox" aria-label={label} onKeyDown={moveFocus}>
+          <div className="case-picker-section" role="group" aria-label={shelfGroupLabel}>
+            <span className="case-picker-section-label">{shelfGroupLabel}</span>
+            <div className="case-picker-grid">
+              {SHELF_CASE_PRESETS.map(renderPresetCard)}
+            </div>
+          </div>
+          <div className="case-picker-section" role="group" aria-label={acrylicGroupLabel}>
+            <span className="case-picker-section-label">{acrylicGroupLabel}</span>
+            <div className="case-picker-grid">
+              {ACRYLIC_CASE_PRESETS.map(renderPresetCard)}
+            </div>
+          </div>
+          {renderPresetCard('custom')}
         </div>
       </div>}
     </div>
@@ -1147,7 +1178,10 @@ function ProjectRail({ project, projects, onInspect }: {
             id: entry.id,
             name: t(entry.nameKey),
             description: t(entry.descriptionKey, { count: entry.descriptionCount }),
-            preview: OBJECT_CATALOG_PREVIEWS[entry.previewId]
+            preview: OBJECT_CATALOG_PREVIEWS[entry.previewId],
+            group: objectCategory === 'displayCases' && entry.group
+              ? t(OBJECT_GROUP_KEYS[entry.group])
+              : undefined
           }))}
           importLabel={t('importFile')}
           importHint={t('supportedFileTypes')}
@@ -1200,7 +1234,7 @@ function Inspector({ item, project, caseSelected, loadError }: { item: DisplayIt
             <select value={item.builtin.casePreset ?? 'modern3'} onChange={(event) => updateItem((target) => {
               if (target.builtin) target.builtin.casePreset = event.target.value as CasePreset
             })}>
-              {CASE_PRESETS.filter((preset) => preset !== 'custom').map((preset) => <option value={preset} key={preset}>{t(preset)}</option>)}
+              {SHELF_CASE_PRESETS.map((preset) => <option value={preset} key={preset}>{t(preset)}</option>)}
             </select>
           </label>}
           {item.builtin.type === 'acrylicCase' && <label className="select-row">
@@ -1447,6 +1481,8 @@ export function EditorApp(): React.JSX.Element | null {
           <CasePresetControl
             value={project.casePreset}
             label={t('displayCase')}
+            shelfGroupLabel={t('caseGroupShelf')}
+            acrylicGroupLabel={t('caseGroupAcrylic')}
             getName={(preset) => t(preset)}
             onChange={changeCase}
           />

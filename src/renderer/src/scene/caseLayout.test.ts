@@ -29,6 +29,20 @@ describe('getCaseLayout', () => {
     expect(freeform.placementSurfaces).toEqual([0])
   })
 
+  it('uses each acrylic case base and interior dimensions for placement', () => {
+    const low = getCaseLayout('acrylicCaseLow')
+    const standard = getCaseLayout('acrylicCaseStandard')
+    const tall = getCaseLayout('acrylicCaseTall')
+
+    expect(low.placementSurfaces).toEqual([0.12])
+    expect(standard.placementSurfaces).toEqual([0.12])
+    expect(tall.placementSurfaces).toEqual([0.12])
+    expect(low.placementBounds.maxX).toBeGreaterThan(standard.placementBounds.maxX)
+    expect(standard.placementBounds.maxX).toBeGreaterThan(tall.placementBounds.maxX)
+    expect(low.cameraOffsetY).toBeLessThan(standard.cameraOffsetY)
+    expect(standard.cameraOffsetY).toBeLessThan(tall.cameraOffsetY)
+  })
+
   it('migrates the previous five preset values without losing their appearance', () => {
     expect(normalizeCasePreset('custom')).toBe('custom')
     expect(normalizeCasePreset('oneTier')).toBe('modern1')
@@ -36,5 +50,6 @@ describe('getCaseLayout', () => {
     expect(normalizeCasePreset('gallery')).toBe('modern3')
     expect(normalizeCasePreset('glass')).toBe('glass3')
     expect(normalizeCasePreset('warm')).toBe('wood3')
+    expect(normalizeCasePreset('acrylicCaseStandard')).toBe('acrylicCaseStandard')
   })
 })

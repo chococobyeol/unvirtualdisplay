@@ -3,7 +3,12 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import type { AcrylicCaseVariant, CasePreset, DisplayItem } from '../../../shared/types'
 import { CASE_PRESET_META } from '../../../shared/types'
 import { createClearAcrylicMaterial, type AcrylicRenderMode } from './acrylicMaterial'
-import { getCaseLayout } from './caseLayout'
+import {
+  ACRYLIC_CASE_BASE_HEIGHT,
+  ACRYLIC_CASE_PANEL_THICKNESS,
+  ACRYLIC_CASE_PROFILES,
+  getCaseLayout
+} from './caseLayout'
 
 export interface ColliderBox {
   halfExtents: [number, number, number]
@@ -82,8 +87,13 @@ export function createDisplayCaseObject(preset: CasePreset, normalizeToFloor = f
   const root = new THREE.Group()
   if (preset === 'custom') return finish(root, [], normalizeToFloor)
 
+  const meta = CASE_PRESET_META[preset]
+  if (meta.style === 'acrylic') {
+    return createAcrylicCase(meta.acrylicCaseVariant ?? 'standard', 'alphaBlend', normalizeToFloor)
+  }
+
   const layout = getCaseLayout(preset)
-  const style = CASE_PRESET_META[preset].style
+  const style = meta.style
   const palette = style === 'wood'
     ? { base: 0x6b4932, back: 0x493326, frame: 0x2f231c, shelf: 0x8a6244 }
     : style === 'glass'
@@ -162,14 +172,14 @@ export function createDisplayCaseObject(preset: CasePreset, normalizeToFloor = f
   return finish(root, colliders, normalizeToFloor)
 }
 
-function createAcrylicCase(variant: AcrylicCaseVariant, renderMode: AcrylicRenderMode): BuiltObject {
+function createAcrylicCase(
+  variant: AcrylicCaseVariant,
+  renderMode: AcrylicRenderMode,
+  normalizeToFloor = true
+): BuiltObject {
   const root = new THREE.Group()
   const colliders: ColliderBox[] = []
-  const profile = variant === 'low'
-    ? { width: 3.5, depth: 2.7, wallHeight: 1.8 }
-    : variant === 'tall'
-      ? { width: 2.2, depth: 2.15, wallHeight: 3.55 }
-      : { width: 3.1, depth: 2.65, wallHeight: 2.8 }
+  const profile = ACRYLIC_CASE_PROFILES[variant]
   const clear = createClearAcrylicMaterial({
     mode: renderMode,
     color: 0xffffff,
@@ -178,14 +188,14 @@ function createAcrylicCase(variant: AcrylicCaseVariant, renderMode: AcrylicRende
     alphaOpacity: 0.08
   })
   const base = new THREE.MeshStandardMaterial({ color: 0x302e2b, roughness: 0.38, metalness: 0.08 })
-  const baseSize: BoxSize = [profile.width, 0.12, profile.depth]
-  const basePosition: BoxPosition = [0, 0.06, 0]
+  const baseSize: BoxSize = [profile.width, ACRYLIC_CASE_BASE_HEIGHT, profile.depth]
+  const basePosition: BoxPosition = [0, ACRYLIC_CASE_BASE_HEIGHT / 2, 0]
   addRoundedBox(root, baseSize, basePosition, base, 0.035)
   colliders.push(collider(baseSize, basePosition))
 
   const wallHeight = profile.wallHeight
-  const panelThickness = 0.05
-  const wallCenter = 0.12 + wallHeight / 2
+  const panelThickness = ACRYLIC_CASE_PANEL_THICKNESS
+  const wallCenter = ACRYLIC_CASE_BASE_HEIGHT + wallHeight / 2
   const wallX = profile.width / 2 - panelThickness / 2
   const wallZ = profile.depth / 2 - panelThickness / 2
   const wallDepth = profile.depth - panelThickness * 2
@@ -194,7 +204,7 @@ function createAcrylicCase(variant: AcrylicCaseVariant, renderMode: AcrylicRende
     [[profile.width, wallHeight, panelThickness], [0, wallCenter, wallZ]],
     [[panelThickness, wallHeight, wallDepth], [-wallX, wallCenter, 0]],
     [[panelThickness, wallHeight, wallDepth], [wallX, wallCenter, 0]],
-    [[profile.width, panelThickness, profile.depth], [0, 0.12 + wallHeight + panelThickness / 2, 0]]
+    [[profile.width, panelThickness, profile.depth], [0, ACRYLIC_CASE_BASE_HEIGHT + wallHeight + panelThickness / 2, 0]]
   ]
   for (const [index, [size, position]] of parts.entries()) {
     addRoundedBox(root, size, position, clear, index === 4 ? 0.018 : 0.012, false, 6)
@@ -202,7 +212,7 @@ function createAcrylicCase(variant: AcrylicCaseVariant, renderMode: AcrylicRende
     // editor, so exhibits can be moved into the case without disabling physics.
     if (index !== 1) colliders.push(collider(size, position))
   }
-  return finish(root, colliders)
+  return finish(root, colliders, normalizeToFloor)
 }
 
 function createAcrylicSteps(stepCount: number, renderMode: AcrylicRenderMode): BuiltObject {

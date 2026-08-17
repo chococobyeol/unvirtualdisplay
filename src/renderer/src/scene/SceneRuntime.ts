@@ -844,10 +844,14 @@ export class SceneRuntime {
 
     const builtCase = createDisplayCaseObject(preset)
     this.caseLayer.add(builtCase.root)
+    const layout = getCaseLayout(preset)
 
     if (this.variant === 'editor') {
-      const grid = new THREE.GridHelper(preset === 'custom' ? 10 : 5.2, preset === 'custom' ? 40 : 20, 0x6f6558, 0x403b35)
-      grid.position.y = 0.008
+      const caseSize = builtCase.bounds.getSize(new THREE.Vector3())
+      const gridSize = preset === 'custom' ? 10 : Math.max(caseSize.x, caseSize.z)
+      const gridDivisions = preset === 'custom' ? 40 : Math.max(12, Math.round(gridSize / 0.26))
+      const grid = new THREE.GridHelper(gridSize, gridDivisions, 0x6f6558, 0x403b35)
+      grid.position.y = (layout.placementSurfaces.at(-1) ?? 0) + 0.008
       const materials = Array.isArray(grid.material) ? grid.material : [grid.material]
       materials.forEach((material) => { material.transparent = true; material.opacity = 0.22 })
       this.caseLayer.add(grid)
@@ -856,7 +860,7 @@ export class SceneRuntime {
     for (const part of builtCase.colliders) this.addStaticCollider(part.halfExtents, part.position)
     // A wide invisible floor sits directly beneath the case base so items that
     // fall over an edge settle below the display instead of falling forever.
-    this.addStaticCollider([24, 0.08, 24], [0, preset === 'custom' ? -0.08 : -0.26, 0])
+    this.addStaticCollider([24, 0.08, 24], [0, layout.placementBounds.floorSurface - 0.08, 0])
     for (const runtime of this.items.values()) runtime.body?.wakeUp()
   }
 
@@ -925,9 +929,11 @@ export class SceneRuntime {
           runtime.root.updateMatrix()
           return runtime.bounds.clone().applyMatrix4(runtime.root.matrix)
         })
+      const casePreset = this.project?.casePreset ?? 'modern3'
+      const baseSurface = getCaseLayout(casePreset).placementSurfaces.at(-1) ?? 0
       const position = placedItem.kind === 'builtin'
-        ? findOpenFloorPosition(loaded.bounds, placedItem.transform, occupied)
-        : findOpenImportPosition(loaded.bounds, placedItem.transform, occupied, this.project?.casePreset ?? 'modern3')
+        ? findOpenFloorPosition(loaded.bounds, placedItem.transform, occupied, baseSurface)
+        : findOpenImportPosition(loaded.bounds, placedItem.transform, occupied, casePreset)
       placedItem.transform.position = { x: position.x, y: position.y, z: position.z }
       const localItem = this.project?.items.find((candidate) => candidate.id === item.id)
       if (localItem) localItem.transform = structuredClone(placedItem.transform)

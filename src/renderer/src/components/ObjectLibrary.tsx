@@ -1,3 +1,4 @@
+import { Fragment } from 'react'
 import { FileInput, X } from 'lucide-react'
 import type { ObjectLibraryCategory } from '../objectCatalog'
 
@@ -11,6 +12,7 @@ export interface ObjectLibraryEntryView {
   name: string
   description: string
   preview: string
+  group?: string
 }
 
 interface ObjectLibraryProps {
@@ -70,17 +72,22 @@ export function ObjectLibrary({
         aria-labelledby={`object-library-tab-${activeCategory}`}
       >
         <div className="object-library-grid">
-          {entries.map((entry) => <button
-            key={entry.id}
-            type="button"
-            className="object-library-card"
-            data-catalog-entry={entry.id}
-            title={`${entry.name} — ${entry.description}`}
-            onClick={() => onAdd(entry.id)}
-          >
-            <img src={entry.preview} alt="" draggable={false} aria-hidden="true" />
-            <span><b>{entry.name}</b><small>{entry.description}</small></span>
-          </button>)}
+          {entries.map((entry, index) => <Fragment key={entry.id}>
+            {entry.group && entry.group !== entries[index - 1]?.group && <h3
+              className="object-library-group-label"
+              data-object-group={entry.group}
+            >{entry.group}</h3>}
+            <button
+              type="button"
+              className="object-library-card"
+              data-catalog-entry={entry.id}
+              title={`${entry.name} — ${entry.description}`}
+              onClick={() => onAdd(entry.id)}
+            >
+              <img src={entry.preview} alt="" draggable={false} aria-hidden="true" />
+              <span><b>{entry.name}</b><small>{entry.description}</small></span>
+            </button>
+          </Fragment>)}
         </div>
       </section>
     </div>

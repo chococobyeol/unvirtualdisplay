@@ -5,9 +5,13 @@ import { OBJECT_CATALOG, OBJECT_LIBRARY_CATEGORIES } from './objectCatalog'
 const categoryKeys = {
   all: 'objectCategoryAll',
   displayCases: 'objectCategoryDisplayCases',
-  acrylicCases: 'objectCategoryAcrylicCases',
   risers: 'objectCategoryRisers',
   shelvesParts: 'objectCategoryShelvesParts'
+} as const
+
+const groupKeys = {
+  shelfCases: 'caseGroupShelf',
+  acrylicCases: 'caseGroupAcrylic'
 } as const
 
 describe('object catalog copy', () => {
@@ -23,6 +27,9 @@ describe('object catalog copy', () => {
       const translation = resources[locale].translation as Record<string, string>
       for (const category of OBJECT_LIBRARY_CATEGORIES) {
         expect(translation[categoryKeys[category]], `${locale}:${category}`).toBeTruthy()
+      }
+      for (const group of Object.keys(groupKeys) as (keyof typeof groupKeys)[]) {
+        expect(translation[groupKeys[group]], `${locale}:${group}`).toBeTruthy()
       }
       for (const entry of OBJECT_CATALOG) {
         expect(translation[entry.nameKey], `${locale}:${entry.nameKey}`).toBeTruthy()

@@ -163,6 +163,28 @@ describe('built-in scene objects', () => {
     expect(low.bounds.max.x).toBeGreaterThan(tall.bounds.max.x)
   })
 
+  it('reuses all three acrylic cases as primary display presets', () => {
+    const presets = [
+      ['acrylicCaseLow', 'low'],
+      ['acrylicCaseStandard', 'standard'],
+      ['acrylicCaseTall', 'tall']
+    ] as const
+
+    for (const [preset, variant] of presets) {
+      const primary = createDisplayCaseObject(preset)
+      const movable = createBuiltInObject(builtInItem('acrylicCase', {
+        type: 'acrylicCase',
+        acrylicCaseVariant: variant
+      }))
+
+      expect(primary.bounds.getSize(new THREE.Vector3()).toArray()).toEqual(
+        movable.bounds.getSize(new THREE.Vector3()).toArray()
+      )
+      expect(primary.colliders).toHaveLength(5)
+      expect(primary.colliders.some((part) => part.position[2] > 1.3)).toBe(false)
+    }
+  })
+
   it('can use physically transmissive acrylic for non-nested renders', () => {
     const objects = [
       createBuiltInObject(builtInItem('acrylicCase'), { acrylicRenderMode: 'physical' }),

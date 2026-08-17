@@ -75,6 +75,25 @@ describe('findOpenImportPosition', () => {
     expect(position.z).toBeGreaterThan(1.12)
   })
 
+  it('places new items on the raised base inside a tall acrylic case', () => {
+    const position = findOpenImportPosition(itemBounds, transform, [], 'acrylicCaseTall')
+
+    expect(position).toMatchObject({ x: 0, y: 0.12, z: 0 })
+  })
+
+  it('stages an item in front of a full acrylic case instead of outside its side walls', () => {
+    const occupied = [new THREE.Box3(
+      new THREE.Vector3(-1.02, 0.12, -0.995),
+      new THREE.Vector3(1.02, 3.7, 0.995)
+    )]
+
+    const position = findOpenImportPosition(itemBounds, transform, occupied, 'acrylicCaseTall')
+
+    expect(position.x).toBe(0)
+    expect(position.y).toBe(0)
+    expect(position.z).toBeGreaterThan(0.995)
+  })
+
   it('places regular imports directly on the freeform floor', () => {
     const position = findOpenImportPosition(itemBounds, transform, [], 'custom')
 
@@ -98,6 +117,12 @@ describe('findOpenImportPosition', () => {
     expect(position.y).toBe(0)
     expect(position.z).toBe(0)
     expect(placed.intersectsBox(occupied[0])).toBe(false)
+  })
+
+  it('can place a structural object on a raised case base', () => {
+    const position = findOpenFloorPosition(itemBounds, transform, [], 0.12)
+
+    expect(position.y).toBe(0.12)
   })
 
   it('includes the saved position when calculating rendered bounds', () => {

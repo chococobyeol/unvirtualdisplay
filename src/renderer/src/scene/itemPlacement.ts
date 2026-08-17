@@ -2,11 +2,6 @@ import * as THREE from 'three'
 import type { CasePreset, TransformState } from '../../../shared/types'
 import { getCaseLayout } from './caseLayout'
 
-const CASE_MIN_X = -2.48
-const CASE_MAX_X = 2.48
-const CASE_MIN_Z = -1.12
-const CASE_MAX_Z = 1.12
-const FALLBACK_FLOOR_SURFACE = -0.18
 const RECOVERY_FLOOR_LIMIT = -0.28
 const PLACEMENT_STEP = 0.2
 const ITEM_GAP = 0.08
@@ -82,13 +77,14 @@ function isClear(candidate: THREE.Box3, occupied: THREE.Box3[]): boolean {
 export function findOpenFloorPosition(
   localBounds: THREE.Box3,
   transform: TransformState,
-  occupied: THREE.Box3[]
+  occupied: THREE.Box3[],
+  floorSurface = 0
 ): THREE.Vector3 {
   const bounds = transformedItemBounds(localBounds, {
     ...transform,
     position: { x: 0, y: 0, z: 0 }
   })
-  const y = Math.abs(bounds.min.y) < 1e-7 ? 0 : -bounds.min.y
+  const y = floorSurface - bounds.min.y
   const stepX = Math.max(1.2, bounds.max.x - bounds.min.x + ITEM_GAP * 3)
   const stepZ = Math.max(1.2, bounds.max.z - bounds.min.z + ITEM_GAP * 3)
 
@@ -129,10 +125,12 @@ export function findOpenImportPosition(
     ...transform,
     position: { x: 0, y: 0, z: 0 }
   })
-  const xCandidates = centeredCandidates(CASE_MIN_X - bounds.min.x, CASE_MAX_X - bounds.max.x)
-  const zCandidates = centeredCandidates(CASE_MIN_Z - bounds.min.z, CASE_MAX_Z - bounds.max.z)
+  const layout = getCaseLayout(casePreset)
+  const { minX, maxX, minZ, maxZ, floorSurface } = layout.placementBounds
+  const xCandidates = centeredCandidates(minX - bounds.min.x, maxX - bounds.max.x)
+  const zCandidates = centeredCandidates(minZ - bounds.min.z, maxZ - bounds.max.z)
 
-  for (const surface of getCaseLayout(casePreset).placementSurfaces) {
+  for (const surface of layout.placementSurfaces) {
     const y = surface - bounds.min.y
     for (const z of zCandidates) {
       for (const x of xCandidates) {
@@ -144,15 +142,15 @@ export function findOpenImportPosition(
 
   // If all shelves are full, keep the new item visible and movable on the
   // invisible floor just in front of the case instead of overlapping a display.
-  const floorY = FALLBACK_FLOOR_SURFACE - bounds.min.y
-  const stagingX = centeredCandidates(CASE_MIN_X - bounds.min.x, CASE_MAX_X - bounds.max.x)
+  const floorY = floorSurface - bounds.min.y
+  const stagingX = centeredCandidates(minX - bounds.min.x, maxX - bounds.max.x)
   for (let row = 0; row < 4; row += 1) {
-    const z = CASE_MAX_Z + ITEM_GAP - bounds.min.z + row * (bounds.max.z - bounds.min.z + ITEM_GAP * 2)
+    const z = maxZ + ITEM_GAP - bounds.min.z + row * (bounds.max.z - bounds.min.z + ITEM_GAP * 2)
     for (const x of stagingX) {
       const position = new THREE.Vector3(x, floorY, z)
       if (isClear(boxAt(bounds, position), occupied)) return position
     }
   }
 
-  return new THREE.Vector3(0, floorY, CASE_MAX_Z + ITEM_GAP - bounds.min.z)
+  return new THREE.Vector3(0, floorY, maxZ + ITEM_GAP - bounds.min.z)
 }
