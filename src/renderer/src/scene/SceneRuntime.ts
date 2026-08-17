@@ -52,6 +52,7 @@ import {
 } from './physicsPolicy'
 import { isPhysicsSceneHydrated, restoredItemSupportPriority } from './sceneHydration'
 import { pickSceneSelection, transformAxisAtPointer } from './sceneSelection'
+import { prepareImportedModelForScene } from './importedModel'
 
 interface SceneCallbacks {
   onSelect: (id: string | null) => void
@@ -985,13 +986,7 @@ export class SceneRuntime {
       content = await this.loadObjWithMaterials(item.assetUrl, manager)
     }
 
-    content.traverse((object) => {
-      const mesh = object as THREE.Mesh
-      if (!mesh.isMesh) return
-      mesh.castShadow = true
-      mesh.receiveShadow = true
-      if (Array.isArray(mesh.material)) mesh.material.forEach((material) => { material.side = THREE.FrontSide })
-    })
+    prepareImportedModelForScene(content)
 
     const root = new THREE.Group()
     root.add(content)
