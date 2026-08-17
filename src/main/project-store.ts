@@ -302,7 +302,7 @@ export class ProjectStore {
       ...item,
       id: randomUUID(),
       relativePath: item.relativePath,
-      assetUrl: this.assetUrl(copy.id, item.relativePath)
+      assetUrl: item.relativePath ? this.assetUrl(copy.id, item.relativePath) : ''
     }))
     if (copy.background.relativePath) {
       copy.background.imageUrl = this.assetUrl(copy.id, copy.background.relativePath)
@@ -418,7 +418,7 @@ export class ProjectStore {
     imported.items = source.items.map((item) => ({
       ...item,
       id: randomUUID(),
-      assetUrl: this.assetUrl(imported.id, item.relativePath)
+      assetUrl: item.relativePath ? this.assetUrl(imported.id, item.relativePath) : ''
     }))
     imported.background = normalizeProject(imported).background
     if (imported.background.relativePath) {

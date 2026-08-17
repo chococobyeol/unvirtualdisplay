@@ -16,10 +16,22 @@ import type {
   TransformMode,
   TransformState
 } from '../../../shared/types'
-import { CASE_PRESET_META, createDefaultDisplayTransform, DISPLAY_CASE_SELECTION_ID } from '../../../shared/types'
+import { createDefaultDisplayTransform, DISPLAY_CASE_SELECTION_ID } from '../../../shared/types'
 import { cameraSettingsEqual, shouldApplySyncedCamera } from '../../../shared/camera'
-import { findOpenImportPosition, fitImportedItemScale, isPlacementBelowSafetyFloor } from './itemPlacement'
+import { findOpenFloorPosition, findOpenImportPosition, fitImportedItemScale, isPlacementBelowSafetyFloor } from './itemPlacement'
 import { getCaseLayout } from './caseLayout'
+import { createBuiltInObject, createDisplayCaseObject, type ColliderBox } from './builtInObjects'
+import { createClearAcrylicMaterial } from './acrylicMaterial'
+import { acrylicStandBaseDimensions } from './acrylicStand'
+import {
+  addBuiltInItemColliders,
+  bodyOverlapsCollisionScene,
+  configureItemRigidBody,
+  createItemRigidBodyDescriptor,
+  environmentCollisionGroups,
+  findNearestClearBodyPosition,
+  itemCollisionGroups
+} from './physicsPolicy'
 import { pickSceneSelection, transformAxisAtPointer } from './sceneSelection'
 
 interface SceneCallbacks {
@@ -38,6 +50,7 @@ interface RuntimeItem {
   clips: THREE.AnimationClip[]
   vrm: VRM | null
   snapshot: DisplayItem
+  builtinColliders?: readonly ColliderBox[]
   colliderShape?: RAPIER.Shape
   colliderScaleKey?: string
 }
@@ -52,9 +65,6 @@ interface DragTarget {
   safeScale: THREE.Vector3 | null
 }
 
-const ENVIRONMENT_GROUP = 0x0001
-const ITEM_GROUP = 0x0002
-const groupMask = (memberships: number, filters: number): number => (memberships << 16) | filters
 let rapierInitialization: Promise<void> | null = null
 
 function initializeRapier(): Promise<void> {
@@ -529,10 +539,12 @@ export class SceneRuntime {
     for (const item of project.items) {
       const runtime = this.items.get(item.id)
       const requiresReload = runtime && (
+        runtime.snapshot.kind !== item.kind ||
         runtime.snapshot.assetUrl !== item.assetUrl ||
         runtime.snapshot.imageDisplayType !== item.imageDisplayType ||
         runtime.snapshot.acrylicShape !== item.acrylicShape ||
-        runtime.snapshot.acrylicOffset !== item.acrylicOffset
+        runtime.snapshot.acrylicOffset !== item.acrylicOffset ||
+        JSON.stringify(runtime.snapshot.builtin) !== JSON.stringify(item.builtin)
       )
       if (requiresReload) this.removeRuntimeItem(runtime, true)
       const current = this.items.get(item.id)
@@ -706,11 +718,6 @@ export class SceneRuntime {
             anyChanged = true
             continue
           }
-          if (isDraggedBody && this.dragTarget && !this.isBodyOverlappingEnvironment(body)) {
-            this.dragTarget.safePosition = runtime.root.position.clone()
-            this.dragTarget.safeQuaternion = runtime.root.quaternion.clone()
-            this.dragTarget.safeScale = runtime.root.scale.clone()
-          }
           if (body.bodyType() === RAPIER.RigidBodyType.Dynamic && !body.isSleeping()) anyMoving = true
           if (transformsDiffer(transformOf(runtime.root), runtime.snapshot.transform)) anyChanged = true
         }
@@ -780,73 +787,21 @@ export class SceneRuntime {
       for (const body of this.staticBodies.splice(0)) this.world.removeRigidBody(body)
     }
 
-    const layout = getCaseLayout(preset)
-    const style = CASE_PRESET_META[preset].style
-    const palette = style === 'wood'
-      ? { base: 0x6b4932, back: 0x493326, frame: 0x2f231c, shelf: 0x8a6244 }
-      : style === 'glass'
-        ? { base: 0x272a2c, back: 0x9eaaa8, frame: 0x27292b, shelf: 0x494f51 }
-        : { base: 0xd7d0c3, back: 0xc6c0b4, frame: 0x45413d, shelf: 0xb4aea3 }
-
-    const baseMaterial = new THREE.MeshStandardMaterial({ color: palette.base, roughness: style === 'wood' ? 0.72 : 0.48, metalness: 0.03 })
-    const backMaterial = new THREE.MeshStandardMaterial({ color: palette.back, roughness: 0.78 })
-    const shelfMaterial = new THREE.MeshStandardMaterial({ color: palette.shelf, roughness: style === 'wood' ? 0.65 : 0.42, metalness: style === 'glass' ? 0.25 : 0.02 })
-    const frameMaterial = new THREE.MeshStandardMaterial({ color: palette.frame, roughness: 0.42, metalness: 0.35 })
-
-    const addBox = (size: [number, number, number], position: [number, number, number], material: THREE.Material, shadows = true): THREE.Mesh => {
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), material)
-      mesh.position.set(...position)
-      mesh.castShadow = shadows
-      mesh.receiveShadow = shadows
-      this.caseLayer.add(mesh)
-      return mesh
-    }
-
-    addBox([5.4, 0.18, 2.7], [0, -0.09, 0], baseMaterial)
-    const backPanel = addBox([5.25, layout.backHeight, 0.12], [0, layout.backCenterY, -1.29], backMaterial)
-    // The rear panel only needs to receive shadows. Excluding it from the
-    // shadow map prevents its two close faces from shadowing each other.
-    backPanel.castShadow = false
-    for (const shelfHeight of layout.shelfHeights) {
-      addBox([4.95, 0.1, 2.4], [0, shelfHeight, 0], shelfMaterial)
-    }
-
-    if (style === 'glass') {
-      const glass = new THREE.MeshPhysicalMaterial({ color: 0xdceeed, transparent: true, opacity: 0.13, roughness: 0.08, metalness: 0, transmission: 0.25, depthWrite: false, side: THREE.DoubleSide })
-      const left = new THREE.Mesh(new THREE.PlaneGeometry(2.7, layout.backHeight), glass)
-      left.rotation.y = Math.PI / 2
-      left.position.set(-2.64, layout.backCenterY, 0)
-      const right = left.clone()
-      right.position.x = 2.64
-      this.caseLayer.add(left, right)
-    }
-
-    for (const x of [-2.64, 2.64]) {
-      addBox([0.1, layout.frameHeight, 0.1], [x, layout.frameCenterY, -1.25], frameMaterial)
-      addBox([0.1, layout.frameHeight, 0.1], [x, layout.frameCenterY, 1.25], frameMaterial)
-    }
-    addBox([5.38, 0.1, 0.1], [0, layout.topHeight, -1.25], frameMaterial)
-    addBox([5.38, 0.1, 0.1], [0, layout.topHeight, 1.25], frameMaterial)
+    const builtCase = createDisplayCaseObject(preset)
+    this.caseLayer.add(builtCase.root)
 
     if (this.variant === 'editor') {
-      const grid = new THREE.GridHelper(5.2, 20, 0x6f6558, 0x403b35)
+      const grid = new THREE.GridHelper(preset === 'custom' ? 10 : 5.2, preset === 'custom' ? 40 : 20, 0x6f6558, 0x403b35)
       grid.position.y = 0.008
       const materials = Array.isArray(grid.material) ? grid.material : [grid.material]
       materials.forEach((material) => { material.transparent = true; material.opacity = 0.22 })
       this.caseLayer.add(grid)
     }
 
-    this.addStaticCollider([2.7, 0.09, 1.35], [0, -0.09, 0])
-    for (const shelfHeight of layout.shelfHeights) {
-      this.addStaticCollider([2.58, 0.05, 1.22], [0, shelfHeight, 0])
-    }
-    const wallHalfHeight = layout.backHeight / 2
-    this.addStaticCollider([2.64, wallHalfHeight, 0.06], [0, layout.backCenterY, -1.29])
-    this.addStaticCollider([0.05, wallHalfHeight, 1.3], [-2.66, layout.backCenterY, 0])
-    this.addStaticCollider([0.05, wallHalfHeight, 1.3], [2.66, layout.backCenterY, 0])
+    for (const part of builtCase.colliders) this.addStaticCollider(part.halfExtents, part.position)
     // A wide invisible floor sits directly beneath the case base so items that
     // fall over an edge settle below the display instead of falling forever.
-    this.addStaticCollider([24, 0.08, 24], [0, -0.26, 0])
+    this.addStaticCollider([24, 0.08, 24], [0, preset === 'custom' ? -0.08 : -0.26, 0])
     for (const runtime of this.items.values()) runtime.body?.wakeUp()
     this.settlementReported = false
   }
@@ -854,7 +809,7 @@ export class SceneRuntime {
   private addStaticCollider(halfExtents: [number, number, number], position: [number, number, number]): void {
     if (!this.world) return
     const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(...position))
-    const collider = RAPIER.ColliderDesc.cuboid(...halfExtents).setCollisionGroups(groupMask(ENVIRONMENT_GROUP, ITEM_GROUP))
+    const collider = RAPIER.ColliderDesc.cuboid(...halfExtents).setCollisionGroups(environmentCollisionGroups())
     this.world.createCollider(collider, body)
     this.staticBodies.push(body)
   }
@@ -864,7 +819,11 @@ export class SceneRuntime {
     this.pendingItemLoads.set(item.id, loadToken)
     let loaded: RuntimeItem | null = null
     try {
-      loaded = item.kind === 'image' ? await this.createImageItem(item) : await this.createModelItem(item)
+      loaded = item.kind === 'builtin'
+        ? this.createBuiltInItem(item)
+        : item.kind === 'image'
+          ? await this.createImageItem(item)
+          : await this.createModelItem(item)
     } catch (error) {
       console.error(`Failed to load ${item.name}`, error)
       loaded = this.createErrorItem(item)
@@ -882,6 +841,7 @@ export class SceneRuntime {
       latest.imageDisplayType !== item.imageDisplayType ||
       latest.acrylicShape !== item.acrylicShape ||
       latest.acrylicOffset !== item.acrylicOffset ||
+      JSON.stringify(latest.builtin) !== JSON.stringify(item.builtin) ||
       this.items.has(item.id)
     ) {
       if (loaded) disposeObject(loaded.root)
@@ -892,7 +852,7 @@ export class SceneRuntime {
     }
 
     const placedItem = cloneItem(latest)
-    if (autoPlace) placedItem.transform.scale = fitImportedItemScale(loaded.bounds, placedItem.transform)
+    if (autoPlace && placedItem.kind !== 'builtin') placedItem.transform.scale = fitImportedItemScale(loaded.bounds, placedItem.transform)
     const requiresRecovery = isPlacementBelowSafetyFloor(loaded.bounds, placedItem.transform)
     if (autoPlace || requiresRecovery) {
       const occupied = [...this.items.values()]
@@ -901,7 +861,9 @@ export class SceneRuntime {
           runtime.root.updateMatrix()
           return runtime.bounds.clone().applyMatrix4(runtime.root.matrix)
         })
-      const position = findOpenImportPosition(loaded.bounds, placedItem.transform, occupied, this.project?.casePreset ?? 'modern3')
+      const position = placedItem.kind === 'builtin'
+        ? findOpenFloorPosition(loaded.bounds, placedItem.transform, occupied)
+        : findOpenImportPosition(loaded.bounds, placedItem.transform, occupied, this.project?.casePreset ?? 'modern3')
       placedItem.transform.position = { x: position.x, y: position.y, z: position.z }
       const localItem = this.project?.items.find((candidate) => candidate.id === item.id)
       if (localItem) localItem.transform = structuredClone(placedItem.transform)
@@ -970,6 +932,27 @@ export class SceneRuntime {
     return { id: item.id, root, bounds, body: null, mixer, clips, vrm, snapshot: cloneItem(item) }
   }
 
+  private createBuiltInItem(item: DisplayItem): RuntimeItem {
+    const built = createBuiltInObject(item, {
+      // Three's screen-space transmission pass cannot show another
+      // transmissive/transparent object behind the first one. Acrylic cases,
+      // steps and image stands are intentionally nestable, so use one shared
+      // alpha-blended material path in both editor and widget views.
+      acrylicRenderMode: 'alphaBlend'
+    })
+    return {
+      id: item.id,
+      root: built.root,
+      bounds: built.bounds,
+      body: null,
+      mixer: null,
+      clips: [],
+      vrm: null,
+      snapshot: cloneItem(item),
+      builtinColliders: built.colliders
+    }
+  }
+
   private async createImageItem(item: DisplayItem): Promise<RuntimeItem> {
     const texture = await new THREE.TextureLoader().loadAsync(item.assetUrl)
     texture.colorSpace = THREE.SRGBColorSpace
@@ -983,10 +966,11 @@ export class SceneRuntime {
     const root = new THREE.Group()
     const type = item.imageDisplayType ?? 'acrylic'
     const acrylicOffset = Math.max(0.005, item.acrylicOffset ?? 0.045)
+    const acrylicBase = acrylicStandBaseDimensions(panelWidth)
     const frameThickness = 0.075
     const frameOuterBottom = 0.02
     const imageBottom = type === 'acrylic'
-      ? 0.08 + acrylicOffset
+      ? acrylicBase.height + acrylicOffset
       : type === 'frame'
         ? frameOuterBottom + frameThickness
         : 0.03
@@ -1009,8 +993,14 @@ export class SceneRuntime {
     image.castShadow = true
     root.add(image)
 
-    const clear = new THREE.MeshPhysicalMaterial({ color: 0xe9f4f2, transparent: true, opacity: 0.28, roughness: 0.14, transmission: 0.2, depthWrite: false })
-    clear.forceSinglePass = true
+    const acrylicRenderMode = 'alphaBlend'
+    const clear = createClearAcrylicMaterial({
+      mode: acrylicRenderMode,
+      color: 0xffffff,
+      roughness: 0.05,
+      thickness: 0.04,
+      alphaOpacity: 0.09
+    })
     const dark = new THREE.MeshStandardMaterial({ color: 0x302c28, roughness: 0.55 })
     const cream = new THREE.MeshStandardMaterial({ color: 0xe2d8c9, roughness: 0.6 })
 
@@ -1029,17 +1019,16 @@ export class SceneRuntime {
       } else {
         try {
           const cutout = createAcrylicCutoutTexture(texture.image as CanvasImageSource, width, height, panelWidth, panelHeight, offset)
-          const cutoutMaterial = new THREE.MeshPhysicalMaterial({
+          const cutoutMaterial = createClearAcrylicMaterial({
+            mode: acrylicRenderMode,
             map: cutout,
             color: 0xffffff,
-            transparent: true,
-            opacity: 0.42,
-            roughness: 0.12,
-            transmission: 0.18,
-            depthWrite: false,
+            roughness: 0.04,
+            thickness: 0.02,
+            alphaOpacity: 0.11,
+            alphaTest: 0.01,
             side: THREE.DoubleSide
           })
-          cutoutMaterial.forceSinglePass = true
           backing = new THREE.Mesh(new THREE.PlaneGeometry(panelWidth + offset * 2, panelHeight + offset * 2), cutoutMaterial)
         } catch (error) {
           console.warn(`Could not generate acrylic outline for ${item.name}`, error)
@@ -1048,8 +1037,12 @@ export class SceneRuntime {
       }
       backing.position.copy(image.position).setZ(0)
       backing.renderOrder = 10
-      const base = new THREE.Mesh(new THREE.CylinderGeometry(Math.max(0.24, panelWidth * 0.34), Math.max(0.28, panelWidth * 0.38), 0.08, 32), clear)
-      base.position.y = 0.04
+      const base = new THREE.Mesh(
+        new THREE.CylinderGeometry(acrylicBase.width / 2, acrylicBase.width / 2, acrylicBase.height, 48),
+        clear
+      )
+      base.scale.z = acrylicBase.depth / acrylicBase.width
+      base.position.y = acrylicBase.height / 2
       base.renderOrder = 9
       base.castShadow = true
       root.add(backing, base)
@@ -1143,18 +1136,20 @@ export class SceneRuntime {
     if (item.visible === false) return
     const quaternion = runtime.root.quaternion
     const freeImage = item.kind === 'image' && !item.physics.preventToppling && !item.physics.placementLocked
-    const descriptor = item.physics.placementLocked
-      ? RAPIER.RigidBodyDesc.fixed()
-      : RAPIER.RigidBodyDesc.dynamic()
-        .setCanSleep(true)
-        .setLinearDamping(freeImage ? 2.6 : 1.8)
-        .setAngularDamping(freeImage ? 5.5 : 2.8)
-        .setCcdEnabled(true)
-        .setAdditionalSolverIterations(freeImage ? 2 : 0)
-    descriptor.setTranslation(item.transform.position.x, item.transform.position.y, item.transform.position.z)
-    descriptor.setRotation({ x: quaternion.x, y: quaternion.y, z: quaternion.z, w: quaternion.w })
+    const descriptor = createItemRigidBodyDescriptor(
+      item,
+      { x: quaternion.x, y: quaternion.y, z: quaternion.z, w: quaternion.w },
+      freeImage
+    )
     const body = this.world.createRigidBody(descriptor)
-    if (item.physics.preventToppling && !item.physics.placementLocked) body.lockRotations(true, true)
+    configureItemRigidBody(body, item)
+
+    if (item.kind === 'builtin') {
+      addBuiltInItemColliders(this.world, body, item, runtime.builtinColliders ?? [], item.transform.scale)
+      runtime.body = body
+      this.settlementReported = false
+      return
+    }
 
     const collider = item.kind === 'image'
       ? this.createImageCollider(runtime, item)
@@ -1163,7 +1158,7 @@ export class SceneRuntime {
       .setFriction(0.72)
       .setRestitution(0)
       .setContactSkin(0.003)
-      .setCollisionGroups(groupMask(ITEM_GROUP, ENVIRONMENT_GROUP | (item.physics.collision ? ITEM_GROUP : 0)))
+      .setCollisionGroups(itemCollisionGroups(item))
     this.world.createCollider(collider, body)
     runtime.body = body
     this.settlementReported = false
@@ -1386,7 +1381,7 @@ export class SceneRuntime {
       runtime.body.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased, true)
       runtime.body.setLinvel({ x: 0, y: 0, z: 0 }, true)
       runtime.body.setAngvel({ x: 0, y: 0, z: 0 }, true)
-      const startsClear = !this.isBodyOverlappingEnvironment(runtime.body)
+      const startsClear = !bodyOverlapsCollisionScene(this.world, runtime.body)
       this.dragTarget = {
         id: runtime.id,
         position: runtime.root.position.clone(),
@@ -1397,29 +1392,50 @@ export class SceneRuntime {
         safeScale: startsClear ? runtime.root.scale.clone() : null
       }
     } else {
-      let restoredSafePose = false
-      if (this.isBodyOverlappingEnvironment(runtime.body)) {
-        const safePosition = this.dragTarget?.safePosition ?? this.findNearestClearPosition(runtime.body)
-        if (safePosition) {
-          runtime.body.setTranslation(safePosition, true)
-          if (this.dragTarget?.safeQuaternion) runtime.body.setRotation(this.dragTarget.safeQuaternion, true)
-          restoredSafePose = true
+      const completedDragTarget = this.dragTarget
+      let restoredPreviousPose = false
+      if (bodyOverlapsCollisionScene(this.world, runtime.body)) {
+        const nearestClearPosition = findNearestClearBodyPosition(this.world, runtime.body)
+        if (nearestClearPosition) {
+          runtime.body.setTranslation(nearestClearPosition, true)
+        } else if (completedDragTarget?.safePosition) {
+          runtime.body.setTranslation(completedDragTarget.safePosition, true)
+          if (completedDragTarget.safeQuaternion) runtime.body.setRotation(completedDragTarget.safeQuaternion, true)
+          restoredPreviousPose = true
         }
       }
       const translation = runtime.body.translation()
       const rotation = runtime.body.rotation()
       runtime.root.position.set(translation.x, translation.y, translation.z)
       runtime.root.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w)
-      if (this.dragTarget?.id === runtime.id) {
-        const scale = restoredSafePose
-          ? this.dragTarget.safeScale ?? this.dragTarget.scale
-          : this.dragTarget.scale
+      if (completedDragTarget?.id === runtime.id) {
+        const scale = restoredPreviousPose
+          ? completedDragTarget.safeScale ?? completedDragTarget.scale
+          : completedDragTarget.scale
         runtime.root.scale.copy(scale)
       }
-      this.dragTarget = null
-      const transform = transformOf(runtime.root)
+      let transform = transformOf(runtime.root)
       runtime.snapshot.transform = transform
       this.rebuildPhysics(runtime)
+
+      // Scaling changes the collider only during rebuild. Validate that final
+      // shape too, otherwise a large scale can create the same persisted
+      // overlap even when the drag-time collider was clear.
+      if (runtime.body && bodyOverlapsCollisionScene(this.world, runtime.body, { x: 0, y: 0, z: 0 }, true)) {
+        const nearestClearPosition = findNearestClearBodyPosition(this.world, runtime.body, 4, true)
+        if (nearestClearPosition) {
+          runtime.root.position.set(nearestClearPosition.x, nearestClearPosition.y, nearestClearPosition.z)
+        } else {
+          if (completedDragTarget?.safePosition) runtime.root.position.copy(completedDragTarget.safePosition)
+          if (completedDragTarget?.safeQuaternion) runtime.root.quaternion.copy(completedDragTarget.safeQuaternion)
+          if (completedDragTarget?.safeScale) runtime.root.scale.copy(completedDragTarget.safeScale)
+        }
+        transform = transformOf(runtime.root)
+        runtime.snapshot.transform = transform
+        this.rebuildPhysics(runtime)
+      }
+
+      this.dragTarget = null
       this.callbacks.onTransform(runtime.id, transform, true)
       this.activeTransformId = null
       this.setSelection(this.selectedId)
@@ -1476,59 +1492,6 @@ export class SceneRuntime {
       const factor = 4 / angularLength
       body.setAngvel({ x: angular.x * factor, y: angular.y * factor, z: angular.z * factor }, true)
     }
-  }
-
-  private isBodyOverlappingEnvironment(body: RAPIER.RigidBody): boolean {
-    if (!this.world) return false
-    for (let index = 0; index < body.numColliders(); index += 1) {
-      const collider = body.collider(index)
-      const intersection = this.world.intersectionWithShape(
-        collider.translation(),
-        collider.rotation(),
-        collider.shape,
-        RAPIER.QueryFilterFlags.ONLY_FIXED,
-        groupMask(ITEM_GROUP, ENVIRONMENT_GROUP),
-        collider,
-        body
-      )
-      if (intersection) return true
-    }
-    return false
-  }
-
-  private findNearestClearPosition(body: RAPIER.RigidBody): THREE.Vector3 | null {
-    if (!this.world || body.numColliders() === 0) return null
-    const collider = body.collider(0)
-    const colliderPosition = collider.translation()
-    const bodyPosition = body.translation()
-    const directions = [
-      new THREE.Vector3(0, 1, 0),
-      new THREE.Vector3(0, -1, 0),
-      new THREE.Vector3(1, 0, 0),
-      new THREE.Vector3(-1, 0, 0),
-      new THREE.Vector3(0, 0, 1),
-      new THREE.Vector3(0, 0, -1)
-    ]
-
-    for (let distance = 0.02; distance <= 2.5; distance += 0.02) {
-      for (const direction of directions) {
-        const offset = direction.clone().multiplyScalar(distance)
-        const candidateColliderPosition = new THREE.Vector3(colliderPosition.x, colliderPosition.y, colliderPosition.z).add(offset)
-        const intersection = this.world.intersectionWithShape(
-          candidateColliderPosition,
-          collider.rotation(),
-          collider.shape,
-          RAPIER.QueryFilterFlags.ONLY_FIXED,
-          groupMask(ITEM_GROUP, ENVIRONMENT_GROUP),
-          collider,
-          body
-        )
-        if (!intersection) {
-          return new THREE.Vector3(bodyPosition.x, bodyPosition.y, bodyPosition.z).add(offset)
-        }
-      }
-    }
-    return null
   }
 
   private handlePointerDown = (event: PointerEvent): void => {

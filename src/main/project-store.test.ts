@@ -81,6 +81,46 @@ describe('ProjectStore', () => {
     expect(deleted.project.id).toBe(original.id)
   })
 
+  it('duplicates and archives built-in objects without creating fake asset paths', async () => {
+    const store = await createStore()
+    const project = await store.getActiveProject()
+    project.items.push({
+      id: crypto.randomUUID(),
+      name: 'Acrylic steps',
+      kind: 'builtin',
+      format: 'object',
+      assetUrl: '',
+      relativePath: '',
+      builtin: { type: 'acrylicSteps', steps: 4 },
+      transform: {
+        position: { x: 1, y: 0, z: -1 },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 }
+      },
+      physics: { collision: true, preventToppling: true, placementLocked: false },
+      animation: { enabled: false, clipIndex: 0, loop: true, speed: 1 }
+    })
+    project.revision += 1
+    await store.saveProject(project)
+
+    const duplicate = await store.duplicateProject(project.id)
+    expect(duplicate.project.items[0]).toMatchObject({
+      kind: 'builtin',
+      assetUrl: '',
+      relativePath: '',
+      builtin: { type: 'acrylicSteps', steps: 4 }
+    })
+
+    const archive = await store.exportProjectArchive(project.id)
+    const restored = await store.importProjectArchive(archive)
+    expect(restored.project.items[0]).toMatchObject({
+      kind: 'builtin',
+      assetUrl: '',
+      relativePath: '',
+      builtin: { type: 'acrylicSteps', steps: 4 }
+    })
+  })
+
   it('persists a custom display order across restarts', async () => {
     const store = await createStore()
     const first = await store.getActiveProject()

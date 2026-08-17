@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import type { DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent } from 'react'
 import * as THREE from 'three'
 import {
+  Blocks,
   Box,
   Camera,
   ChevronDown,
@@ -27,6 +28,7 @@ import {
   type LucideIcon
 } from 'lucide-react'
 import type {
+  AcrylicCaseVariant,
   AcrylicShape,
   AppSettings,
   BackgroundFit,
@@ -51,9 +53,26 @@ import modernTwoCasePreview from '../assets/case-previews/modern-two-tier.jpg'
 import woodOneCasePreview from '../assets/case-previews/wood-one-tier.jpg'
 import woodThreeCasePreview from '../assets/case-previews/wood-three-tier.jpg'
 import woodTwoCasePreview from '../assets/case-previews/wood-two-tier.jpg'
+import acrylicCaseLowPreview from '../assets/object-previews/acrylic-case-low.jpg'
+import acrylicCaseStandardPreview from '../assets/object-previews/acrylic-case-standard.jpg'
+import acrylicCaseTallPreview from '../assets/object-previews/acrylic-case-tall.jpg'
+import acrylicStepsTwoPreview from '../assets/object-previews/acrylic-steps-2.jpg'
+import acrylicStepsThreePreview from '../assets/object-previews/acrylic-steps-3.jpg'
+import acrylicStepsFourPreview from '../assets/object-previews/acrylic-steps-4.jpg'
+import acrylicStepsFivePreview from '../assets/object-previews/acrylic-steps-5.jpg'
+import pedestalObjectPreview from '../assets/object-previews/pedestal.jpg'
+import shelfObjectPreview from '../assets/object-previews/shelf.jpg'
+import {
+  createCatalogItem,
+  entriesForCategory,
+  OBJECT_CATALOG,
+  OBJECT_LIBRARY_CATEGORIES,
+  type ObjectLibraryCategory
+} from '../objectCatalog'
 import { reorderById, type ReorderPlacement } from '../reorder'
 import { getCaseLayout } from '../scene/caseLayout'
 import { useAppStore } from '../store'
+import { ObjectLibrary } from './ObjectLibrary'
 import { SceneView, type SceneViewHandle } from './SceneView'
 
 const LANGUAGES: { value: Language; label: string }[] = [
@@ -120,7 +139,7 @@ function DisplayCaseGlyph(): React.JSX.Element {
 }
 
 function ItemGlyph({ kind }: { kind: DisplayItem['kind'] }): React.JSX.Element {
-  const Glyph = kind === 'model' ? Box : ImageIcon
+  const Glyph = kind === 'builtin' ? Blocks : kind === 'model' ? Box : ImageIcon
   return (
     <span className={`file-dot ${kind}`} aria-hidden="true">
       <Glyph />
@@ -222,7 +241,7 @@ function DisplayFileMenu(): React.JSX.Element {
   )
 }
 
-const CASE_PREVIEW_IMAGES: Record<CasePreset, string> = {
+const CASE_PREVIEW_IMAGES: Partial<Record<CasePreset, string>> = {
   modern1: modernOneCasePreview,
   modern2: modernTwoCasePreview,
   modern3: modernThreeCasePreview,
@@ -234,8 +253,41 @@ const CASE_PREVIEW_IMAGES: Record<CasePreset, string> = {
   wood3: woodThreeCasePreview
 }
 
+const OBJECT_CATEGORY_KEYS: Record<ObjectLibraryCategory, string> = {
+  all: 'objectCategoryAll',
+  displayCases: 'objectCategoryDisplayCases',
+  acrylicCases: 'objectCategoryAcrylicCases',
+  risers: 'objectCategoryRisers',
+  shelvesParts: 'objectCategoryShelvesParts'
+}
+
+const OBJECT_CATALOG_PREVIEWS: Record<string, string> = {
+  modern1: modernOneCasePreview,
+  modern2: modernTwoCasePreview,
+  modern3: modernThreeCasePreview,
+  glass1: glassOneCasePreview,
+  glass2: glassTwoCasePreview,
+  glass3: glassThreeCasePreview,
+  wood1: woodOneCasePreview,
+  wood2: woodTwoCasePreview,
+  wood3: woodThreeCasePreview,
+  acrylicCaseLow: acrylicCaseLowPreview,
+  acrylicCaseStandard: acrylicCaseStandardPreview,
+  acrylicCaseTall: acrylicCaseTallPreview,
+  acrylicSteps2: acrylicStepsTwoPreview,
+  acrylicSteps3: acrylicStepsThreePreview,
+  acrylicSteps4: acrylicStepsFourPreview,
+  acrylicSteps5: acrylicStepsFivePreview,
+  pedestal: pedestalObjectPreview,
+  shelf: shelfObjectPreview
+}
+
 function CasePresetPreview({ preset }: { preset: CasePreset }): React.JSX.Element {
-  return <img className="case-preset-preview" src={CASE_PREVIEW_IMAGES[preset]} alt="" draggable={false} aria-hidden="true" />
+  const preview = CASE_PREVIEW_IMAGES[preset]
+  if (!preview) {
+    return <span className="case-custom-preview" aria-hidden="true"><i /><i /><i /><i /></span>
+  }
+  return <img className="case-preset-preview" src={preview} alt="" draggable={false} aria-hidden="true" />
 }
 
 function CasePresetControl({
@@ -315,7 +367,7 @@ function CasePresetControl({
           {CASE_PRESETS.map((preset) => <button
             key={preset}
             type="button"
-            className="case-preset-card"
+            className={`case-preset-card${preset === 'custom' ? ' custom' : ''}`}
             role="option"
             aria-selected={value === preset}
             title={getName(preset)}
@@ -638,6 +690,8 @@ function ProjectRail({ project, projects, onInspect }: {
   const [projectDrop, setProjectDrop] = useState<{ targetId: string; placement: ReorderPlacement } | null>(null)
   const [draggingItemId, setDraggingItemId] = useState<string | null>(null)
   const [itemDrop, setItemDrop] = useState<{ targetId: string; placement: ReorderPlacement } | null>(null)
+  const [objectLibrary, setObjectLibrary] = useState<{ left: number; top: number } | null>(null)
+  const [objectCategory, setObjectCategory] = useState<ObjectLibraryCategory>('all')
   const cancelProjectRename = useRef(false)
   const suppressProjectClick = useRef(false)
   const suppressItemClick = useRef(false)
@@ -646,6 +700,8 @@ function ProjectRail({ project, projects, onInspect }: {
   const pointerReorder = useRef<PointerReorderState | null>(null)
   const projectMenuRef = useRef<HTMLDivElement>(null)
   const projectMenuAnchorRef = useRef<HTMLButtonElement>(null)
+  const objectLibraryRef = useRef<HTMLDivElement>(null)
+  const objectLibraryAnchorRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     if (!projectMenu) return
@@ -667,6 +723,33 @@ function ProjectRail({ project, projects, onInspect }: {
       document.removeEventListener('scroll', dismissFromViewportChange, true)
     }
   }, [projectMenu])
+
+  useEffect(() => {
+    if (!objectLibrary) return
+    const dismiss = (event: PointerEvent): void => {
+      if (objectLibraryRef.current?.contains(event.target as Node)) return
+      if (objectLibraryAnchorRef.current?.contains(event.target as Node)) return
+      setObjectLibrary(null)
+    }
+    const closeFromKeyboard = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      setObjectLibrary(null)
+      window.requestAnimationFrame(() => objectLibraryAnchorRef.current?.focus())
+    }
+    const dismissFromViewportChange = (): void => setObjectLibrary(null)
+    window.addEventListener('pointerdown', dismiss)
+    window.addEventListener('keydown', closeFromKeyboard)
+    window.addEventListener('resize', dismissFromViewportChange)
+    const focusFrame = window.requestAnimationFrame(() => objectLibraryRef.current?.querySelector<HTMLButtonElement>('.object-library-card')?.focus())
+    return () => {
+      window.cancelAnimationFrame(focusFrame)
+      window.removeEventListener('pointerdown', dismiss)
+      window.removeEventListener('keydown', closeFromKeyboard)
+      window.removeEventListener('resize', dismissFromViewportChange)
+    }
+  }, [objectLibrary])
 
   useEffect(() => () => document.body.classList.remove('list-reordering'), [])
 
@@ -710,6 +793,31 @@ function ProjectRail({ project, projects, onInspect }: {
   const toggleCaseVisibility = (): void => mutate((draft) => {
     draft.caseVisible = draft.caseVisible === false
   })
+  const addCatalogObject = (entryId: string): void => {
+    const entry = OBJECT_CATALOG.find((candidate) => candidate.id === entryId)
+    if (!entry) return
+    const id = crypto.randomUUID()
+    mutate((draft) => {
+      draft.items.push(createCatalogItem(entry, id, t(entry.nameKey)))
+    })
+    setObjectLibrary(null)
+    onInspect()
+    select(id)
+  }
+  const toggleObjectLibrary = (anchor: HTMLButtonElement): void => {
+    if (objectLibrary) {
+      setObjectLibrary(null)
+      return
+    }
+    objectLibraryAnchorRef.current = anchor
+    const bounds = anchor.getBoundingClientRect()
+    const width = 568
+    const height = 438
+    const left = Math.max(10, Math.min(window.innerWidth - width - 10, bounds.right + 9))
+    const top = Math.max(10, Math.min(window.innerHeight - height - 10, bounds.top - 8))
+    setObjectCategory('all')
+    setObjectLibrary({ left, top })
+  }
   const deleteItem = (id: string): void => {
     mutate((draft) => { draft.items = draft.items.filter((item) => item.id !== id) })
     if (selectedId === id) select(null)
@@ -954,15 +1062,18 @@ function ProjectRail({ project, projects, onInspect }: {
         <div className="section-heading">
           <span className="section-heading-title"><h2>{t('items')}</h2><span className="count-badge">{project.items.length}</span></span>
           <button
+            ref={objectLibraryAnchorRef}
             type="button"
-            className="icon-button"
-            title={t('import')}
-            aria-label={t('import')}
-            onClick={() => void importAssets().catch(() => window.alert(t('importFailed')))}
+            className={`icon-button item-add-button${objectLibrary ? ' active' : ''}`}
+            title={t('addObject')}
+            aria-label={t('addObject')}
+            aria-haspopup="dialog"
+            aria-expanded={Boolean(objectLibrary)}
+            onClick={(event) => toggleObjectLibrary(event.currentTarget)}
           ><Icon name="plus" /></button>
         </div>
         <div className="item-list">
-          <div className={`item-row case-row${selectedId === DISPLAY_CASE_SELECTION_ID ? ' active' : ''}${project.caseVisible === false ? ' hidden' : ''}`}>
+          <div className={`item-row case-row${selectedId === DISPLAY_CASE_SELECTION_ID ? ' active' : ''}${project.casePreset !== 'custom' && project.caseVisible === false ? ' hidden' : ''}`}>
             <button className="item-row-main" onClick={() => {
               onInspect()
               select(DISPLAY_CASE_SELECTION_ID)
@@ -970,7 +1081,7 @@ function ProjectRail({ project, projects, onInspect }: {
               <span className="case-dot"><DisplayCaseGlyph /></span>
               <span><b>{t('caseObject')}</b><small>{t(project.casePreset)}</small></span>
             </button>
-            <span className="item-row-actions">
+            {project.casePreset !== 'custom' && <span className="item-row-actions">
               <button
                 className={`item-row-action visibility${project.caseVisible === false ? ' is-off' : ''}`}
                 title={t(project.caseVisible === false ? 'showCase' : 'hideCase')}
@@ -978,7 +1089,7 @@ function ProjectRail({ project, projects, onInspect }: {
                 aria-pressed={project.caseVisible === false}
                 onClick={toggleCaseVisibility}
               ><Icon name={project.caseVisible === false ? 'eyeOff' : 'eye'} /></button>
-            </span>
+            </span>}
           </div>
           {project.items.map((item) => (
             <div
@@ -1002,7 +1113,7 @@ function ProjectRail({ project, projects, onInspect }: {
                 select(item.id)
               }}>
                 <ItemGlyph kind={item.kind} />
-                <span><b>{item.name}</b><small>{item.format.toUpperCase()}</small></span>
+                <span><b>{item.name}</b><small>{item.kind === 'builtin' ? t('builtinObject') : item.format.toUpperCase()}</small></span>
               </button>
               <span className="item-row-actions">
                 <button className={`item-row-action visibility${item.visible === false ? ' is-off' : ''}`} title={t(item.visible === false ? 'showItem' : 'hideItem')} aria-label={t(item.visible === false ? 'showItem' : 'hideItem')} aria-pressed={item.visible === false} onClick={() => toggleItemVisibility(item.id)}><Icon name={item.visible === false ? 'eyeOff' : 'eye'} /></button>
@@ -1012,6 +1123,38 @@ function ProjectRail({ project, projects, onInspect }: {
           ))}
         </div>
       </section>
+      {objectLibrary && <div
+        className="object-library-popover"
+        ref={objectLibraryRef}
+        role="dialog"
+        aria-modal="false"
+        aria-label={t('addObject')}
+        style={{ left: objectLibrary.left, top: objectLibrary.top }}
+      >
+        <ObjectLibrary
+          heading={t('addObject')}
+          hint={t('objectLibraryHint')}
+          closeLabel={t('close')}
+          categoryLabel={t('objectCategories')}
+          categories={OBJECT_LIBRARY_CATEGORIES.map((category) => ({ id: category, label: t(OBJECT_CATEGORY_KEYS[category]) }))}
+          activeCategory={objectCategory}
+          entries={entriesForCategory(objectCategory).map((entry) => ({
+            id: entry.id,
+            name: t(entry.nameKey),
+            description: t(entry.descriptionKey, { count: entry.descriptionCount }),
+            preview: OBJECT_CATALOG_PREVIEWS[entry.previewId]
+          }))}
+          importLabel={t('importFile')}
+          importHint={t('supportedFileTypes')}
+          onClose={() => setObjectLibrary(null)}
+          onCategoryChange={setObjectCategory}
+          onAdd={addCatalogObject}
+          onImport={() => {
+            setObjectLibrary(null)
+            void importAssets().catch(() => window.alert(t('importFailed')))
+          }}
+        />
+      </div>}
     </aside>
   )
 }
@@ -1027,7 +1170,7 @@ function Inspector({ item, project, caseSelected }: { item: DisplayItem | null; 
 
   return (
     <section className="inspector-content">
-      <div className="section-heading inspector-heading"><h2>{t('inspector')}</h2>{item && <span className={`format-pill ${item.kind}`}>{item.format}</span>}</div>
+      <div className="section-heading inspector-heading"><h2>{t('inspector')}</h2>{item && <span className={`format-pill ${item.kind}`}>{item.kind === 'builtin' ? t('builtinObject') : item.format}</span>}</div>
       {caseSelected ? <>
         <div className="case-selection-title"><span className="case-dot"><DisplayCaseGlyph /></span><b>{t('caseObject')}</b></div>
         <section className="property-group">
@@ -1044,6 +1187,33 @@ function Inspector({ item, project, caseSelected }: { item: DisplayItem | null; 
           <VectorFields label={t('rotation')} value={item.transform.rotation} degrees onChange={(rotation) => updateItem((target) => { target.transform.rotation = rotation })} />
           <VectorFields label={t('scale')} value={item.transform.scale} onChange={(scale) => updateItem((target) => { target.transform.scale = scale })} />
         </section>
+        {item.kind === 'builtin' && item.builtin && <section className="property-group">
+          <h3>{t('objectSettings')}</h3>
+          {item.builtin.type === 'displayCase' && <label className="select-row">
+            <span>{t('caseStyle')}</span>
+            <select value={item.builtin.casePreset ?? 'modern3'} onChange={(event) => updateItem((target) => {
+              if (target.builtin) target.builtin.casePreset = event.target.value as CasePreset
+            })}>
+              {CASE_PRESETS.filter((preset) => preset !== 'custom').map((preset) => <option value={preset} key={preset}>{t(preset)}</option>)}
+            </select>
+          </label>}
+          {item.builtin.type === 'acrylicCase' && <label className="select-row">
+            <span>{t('caseProportion')}</span>
+            <select value={item.builtin.acrylicCaseVariant ?? 'standard'} onChange={(event) => updateItem((target) => {
+              if (target.builtin) target.builtin.acrylicCaseVariant = event.target.value as AcrylicCaseVariant
+            })}>
+              {(['low', 'standard', 'tall'] as AcrylicCaseVariant[]).map((variant) => <option value={variant} key={variant}>{t(`acrylicCaseVariant_${variant}`)}</option>)}
+            </select>
+          </label>}
+          {item.builtin.type === 'acrylicSteps' && <label className="select-row">
+            <span>{t('stepCount')}</span>
+            <select value={item.builtin.steps ?? 3} onChange={(event) => updateItem((target) => {
+              if (target.builtin) target.builtin.steps = Number(event.target.value)
+            })}>
+              {[2, 3, 4, 5].map((count) => <option value={count} key={count}>{t('stepCountValue', { count })}</option>)}
+            </select>
+          </label>}
+        </section>}
         <section className="property-group">
           <h3>{t('physics')}</h3>
           <Toggle checked={item.physics.collision} label={t('collision')} onChange={(collision) => updateItem((target) => { target.physics.collision = collision })} />
@@ -1212,7 +1382,7 @@ export function EditorApp(): React.JSX.Element | null {
     if (draft.casePreset === casePreset) return
     const previousLayout = getCaseLayout(draft.casePreset)
     const nextLayout = getCaseLayout(casePreset)
-    const localOffset = (nextLayout.topHeight - previousLayout.topHeight) / 2 * draft.displayTransform.scale.y
+    const localOffset = (nextLayout.cameraOffsetY - previousLayout.cameraOffsetY) * draft.displayTransform.scale.y
     const rotation = draft.displayTransform.rotation
     const offset = new THREE.Vector3(0, localOffset, 0).applyEuler(new THREE.Euler(rotation.x, rotation.y, rotation.z))
     draft.camera.position.x += offset.x
@@ -1227,9 +1397,7 @@ export function EditorApp(): React.JSX.Element | null {
   const resetCamera = (): void => {
     mutate((draft) => {
       const camera = createDefaultCameraSettings()
-      const galleryHeight = getCaseLayout('modern3').topHeight
-      const caseHeight = getCaseLayout(draft.casePreset).topHeight
-      const caseCenterOffset = (caseHeight - galleryHeight) / 2
+      const caseCenterOffset = getCaseLayout(draft.casePreset).cameraOffsetY
       camera.position.y += caseCenterOffset
       camera.target.y += caseCenterOffset
       draft.camera = camera

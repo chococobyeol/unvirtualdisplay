@@ -1,14 +1,16 @@
 export type Language = 'ko' | 'en' | 'ja' | 'zh-Hans'
 export const CASE_PRESETS = [
+  'custom',
   'modern1', 'modern2', 'modern3',
   'glass1', 'glass2', 'glass3',
   'wood1', 'wood2', 'wood3'
 ] as const
 export type CasePreset = typeof CASE_PRESETS[number]
-export type CaseStyle = 'modern' | 'glass' | 'wood'
-export type CaseTier = 1 | 2 | 3
+export type CaseStyle = 'custom' | 'modern' | 'glass' | 'wood'
+export type CaseTier = 0 | 1 | 2 | 3
 
 export const CASE_PRESET_META: Record<CasePreset, { style: CaseStyle, tier: CaseTier }> = {
+  custom: { style: 'custom', tier: 0 },
   modern1: { style: 'modern', tier: 1 },
   modern2: { style: 'modern', tier: 2 },
   modern3: { style: 'modern', tier: 3 },
@@ -34,7 +36,9 @@ export function normalizeCasePreset(value: unknown): CasePreset {
 }
 export type QualityPreset = 'low' | 'balanced' | 'high'
 export type TransformMode = 'translate' | 'rotate' | 'scale'
-export type DisplayItemKind = 'model' | 'image'
+export type DisplayItemKind = 'model' | 'image' | 'builtin'
+export type BuiltinObjectType = 'displayCase' | 'acrylicCase' | 'acrylicSteps' | 'pedestal' | 'shelf'
+export type AcrylicCaseVariant = 'low' | 'standard' | 'tall'
 export type ImageDisplayType = 'acrylic' | 'panel' | 'frame' | 'photocard'
 export type AcrylicShape = 'contour' | 'rectangle' | 'ellipse'
 export type BackgroundMode = 'transparent' | 'solid' | 'image'
@@ -87,6 +91,12 @@ export interface DisplayItem {
   imageDisplayType?: ImageDisplayType
   acrylicShape?: AcrylicShape
   acrylicOffset?: number
+  builtin?: {
+    type: BuiltinObjectType
+    casePreset?: CasePreset
+    acrylicCaseVariant?: AcrylicCaseVariant
+    steps?: number
+  }
   transform: TransformState
   physics: PhysicsSettings
   animation: AnimationSettings

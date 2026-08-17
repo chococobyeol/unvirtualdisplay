@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
 import type { TransformState } from '../../../shared/types'
-import { findOpenImportPosition, fitImportedItemScale, isPlacementBelowSafetyFloor, transformedItemBounds } from './itemPlacement'
+import { findOpenFloorPosition, findOpenImportPosition, fitImportedItemScale, isPlacementBelowSafetyFloor, transformedItemBounds } from './itemPlacement'
 
 const transform: TransformState = {
   position: { x: 0, y: 0, z: 0 },
@@ -73,6 +73,31 @@ describe('findOpenImportPosition', () => {
 
     expect(position.y).toBeCloseTo(-0.18)
     expect(position.z).toBeGreaterThan(1.12)
+  })
+
+  it('places regular imports directly on the freeform floor', () => {
+    const position = findOpenImportPosition(itemBounds, transform, [], 'custom')
+
+    expect(position).toMatchObject({ x: 0, y: 0, z: 0 })
+  })
+
+  it('spreads regular imports across the freeform floor instead of stacking them', () => {
+    const occupied = [itemBounds.clone()]
+    const position = findOpenImportPosition(itemBounds, transform, occupied, 'custom')
+
+    expect(position.y).toBe(0)
+    expect(Math.abs(position.x) + Math.abs(position.z)).toBeGreaterThan(0)
+    expect(itemBounds.clone().translate(position).intersectsBox(occupied[0])).toBe(false)
+  })
+
+  it('finds a clear floor position for structural objects', () => {
+    const occupied = [itemBounds.clone()]
+    const position = findOpenFloorPosition(itemBounds, transform, occupied)
+    const placed = itemBounds.clone().translate(position).expandByScalar(0.079)
+
+    expect(position.y).toBe(0)
+    expect(position.z).toBe(0)
+    expect(placed.intersectsBox(occupied[0])).toBe(false)
   })
 
   it('includes the saved position when calculating rendered bounds', () => {

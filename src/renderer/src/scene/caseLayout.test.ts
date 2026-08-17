@@ -21,7 +21,16 @@ describe('getCaseLayout', () => {
     }
   })
 
+  it('provides a floor-level freeform workspace without a primary case', () => {
+    const freeform = getCaseLayout('custom')
+
+    expect(freeform.tierCount).toBe(0)
+    expect(freeform.shelfHeights).toEqual([])
+    expect(freeform.placementSurfaces).toEqual([0])
+  })
+
   it('migrates the previous five preset values without losing their appearance', () => {
+    expect(normalizeCasePreset('custom')).toBe('custom')
     expect(normalizeCasePreset('oneTier')).toBe('modern1')
     expect(normalizeCasePreset('twoTier')).toBe('modern2')
     expect(normalizeCasePreset('gallery')).toBe('modern3')

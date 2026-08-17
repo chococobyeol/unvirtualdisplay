@@ -79,12 +79,52 @@ function isClear(candidate: THREE.Box3, occupied: THREE.Box3[]): boolean {
   return occupied.every((bounds) => !padded.intersectsBox(bounds))
 }
 
+export function findOpenFloorPosition(
+  localBounds: THREE.Box3,
+  transform: TransformState,
+  occupied: THREE.Box3[]
+): THREE.Vector3 {
+  const bounds = transformedItemBounds(localBounds, {
+    ...transform,
+    position: { x: 0, y: 0, z: 0 }
+  })
+  const y = Math.abs(bounds.min.y) < 1e-7 ? 0 : -bounds.min.y
+  const stepX = Math.max(1.2, bounds.max.x - bounds.min.x + ITEM_GAP * 3)
+  const stepZ = Math.max(1.2, bounds.max.z - bounds.min.z + ITEM_GAP * 3)
+
+  for (let radius = 0; radius <= 6; radius += 1) {
+    const offsets: { x: number, z: number }[] = []
+    for (let zIndex = -radius; zIndex <= radius; zIndex += 1) {
+      for (let xIndex = -radius; xIndex <= radius; xIndex += 1) {
+        if (radius > 0 && Math.abs(xIndex) !== radius && Math.abs(zIndex) !== radius) continue
+        offsets.push({ x: xIndex, z: zIndex })
+      }
+    }
+    offsets.sort((left, right) => {
+      const leftDistance = Math.abs(left.x) + Math.abs(left.z)
+      const rightDistance = Math.abs(right.x) + Math.abs(right.z)
+      if (leftDistance !== rightDistance) return leftDistance - rightDistance
+      if (Math.abs(left.z) !== Math.abs(right.z)) return Math.abs(left.z) - Math.abs(right.z)
+      return left.x - right.x
+    })
+    for (const offset of offsets) {
+      const x = offset.x === 0 ? 0 : offset.x * stepX
+      const z = offset.z === 0 ? 0 : offset.z * stepZ
+      const position = new THREE.Vector3(x, y, z)
+      if (isClear(boxAt(bounds, position), occupied)) return position
+    }
+  }
+  return new THREE.Vector3(0, y, 0)
+}
+
 export function findOpenImportPosition(
   localBounds: THREE.Box3,
   transform: TransformState,
   occupied: THREE.Box3[],
   casePreset: CasePreset = 'modern3'
 ): THREE.Vector3 {
+  if (casePreset === 'custom') return findOpenFloorPosition(localBounds, transform, occupied)
+
   const bounds = transformedItemBounds(localBounds, {
     ...transform,
     position: { x: 0, y: 0, z: 0 }
