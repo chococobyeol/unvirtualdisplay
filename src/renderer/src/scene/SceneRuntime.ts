@@ -466,6 +466,7 @@ export class SceneRuntime {
     this.keyLight.position.set(2.4, 6, 4.2)
     this.keyLight.target.position.set(0, 1.2, 0)
     this.keyLight.castShadow = true
+    this.keyLight.shadow.normalBias = 0.018
     this.keyLight.shadow.mapSize.set(quality === 'high' ? 2048 : 1024, quality === 'high' ? 2048 : 1024)
     this.scene.add(this.fillLight, this.keyLight, this.keyLight.target)
 
@@ -785,7 +786,7 @@ export class SceneRuntime {
         : { base: 0xd7d0c3, back: 0xc6c0b4, frame: 0x45413d, shelf: 0xb4aea3 }
 
     const baseMaterial = new THREE.MeshStandardMaterial({ color: palette.base, roughness: preset === 'warm' ? 0.72 : 0.48, metalness: 0.03 })
-    const backMaterial = new THREE.MeshStandardMaterial({ color: palette.back, roughness: 0.78, side: THREE.DoubleSide })
+    const backMaterial = new THREE.MeshStandardMaterial({ color: palette.back, roughness: 0.78 })
     const shelfMaterial = new THREE.MeshStandardMaterial({ color: palette.shelf, roughness: preset === 'warm' ? 0.65 : 0.42, metalness: preset === 'glass' ? 0.25 : 0.02 })
     const frameMaterial = new THREE.MeshStandardMaterial({ color: palette.frame, roughness: 0.42, metalness: 0.35 })
 
@@ -799,7 +800,10 @@ export class SceneRuntime {
     }
 
     addBox([5.4, 0.18, 2.7], [0, -0.09, 0], baseMaterial)
-    addBox([5.25, 3.9, 0.12], [0, 1.88, -1.29], backMaterial)
+    const backPanel = addBox([5.25, 3.9, 0.12], [0, 1.88, -1.29], backMaterial)
+    // The rear panel only needs to receive shadows. Excluding it from the
+    // shadow map prevents its two close faces from shadowing each other.
+    backPanel.castShadow = false
     addBox([4.95, 0.1, 2.4], [0, 1.42, 0], shelfMaterial)
     addBox([4.95, 0.1, 2.4], [0, 2.78, 0], shelfMaterial)
 
