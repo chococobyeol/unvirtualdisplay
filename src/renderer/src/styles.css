@@ -1,6 +1,39 @@
+@font-face {
+  font-family: 'Inter';
+  src: url('./assets/fonts/InterVariable.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Noto Sans KR';
+  src: url('./assets/fonts/NotoSansKR-VF.otf') format('opentype');
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Noto Sans JP';
+  src: url('./assets/fonts/NotoSansJP-VF.otf') format('opentype');
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Noto Sans SC';
+  src: url('./assets/fonts/NotoSansSC-VF.otf') format('opentype');
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
 :root {
   color-scheme: dark;
-  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-ui: 'Inter', ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: var(--font-ui);
   font-synthesis: none;
   color: #eee9df;
   background: #11100f;
@@ -15,9 +48,13 @@
   --danger: #d78275;
 }
 
+:root:lang(ko) { --font-ui: 'Noto Sans KR', 'Inter', ui-sans-serif, sans-serif; }
+:root:lang(ja) { --font-ui: 'Noto Sans JP', 'Inter', ui-sans-serif, sans-serif; }
+:root:lang(zh) { --font-ui: 'Noto Sans SC', 'Inter', ui-sans-serif, sans-serif; }
+
 * { box-sizing: border-box; }
 html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
-body { user-select: none; }
+body { user-select: none; line-height: 1.4; }
 html[data-role='display'],
 html[data-role='display'] body,
 html[data-role='display'] #root { background: transparent; }
@@ -46,7 +83,7 @@ button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke
 .brand-mark { width: 34px; height: 34px; font-size: 21px; flex: none; }
 .brand span:last-child { min-width: 0; display: flex; flex-direction: column; }
 .brand b { font-family: Georgia, serif; font-weight: 500; letter-spacing: .01em; font-size: 17px; white-space: nowrap; }
-.brand small { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.brand small { color: var(--muted); font-size: 12px; line-height: 17px; margin-top: 2px; }
 .panel-section { padding: 15px 12px; border-bottom: 1px solid var(--line); min-height: 0; }
 .panel-section.grow { flex: 0 1 250px; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
@@ -69,18 +106,18 @@ button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke
 .project-list::-webkit-scrollbar-thumb, .item-list::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 999px; background: rgba(151, 143, 132, .48); background-clip: padding-box; }
 .project-list { max-height: 178px; }
 .project-card, .item-row { border: 1px solid transparent; background: transparent; text-align: left; display: flex; align-items: center; min-width: 0; }
-.project-card { position: relative; height: 48px; flex: none; padding: 0 4px 0 0; gap: 0; border-radius: 8px; }
-.project-card.editing { padding: 7px; gap: 9px; cursor: default; }
+.project-card { position: relative; height: 50px; flex: none; padding: 0 4px 0 0; gap: 0; border-radius: 8px; }
+.project-card.editing { padding: 6px 7px; gap: 9px; cursor: default; }
 .project-card:hover, .project-card.active { background: rgba(255,255,255,.035); }
 .project-card.active { border-color: rgba(231, 184, 114, .24); background: var(--accent-soft); }
 .project-card-main { flex: 1; align-self: stretch; min-width: 0; padding: 7px 3px 7px 7px; border: 0; background: transparent; display: flex; align-items: center; gap: 9px; overflow: hidden; text-align: left; cursor: pointer; }
 .reorderable-row-main { cursor: grab; user-select: none; touch-action: none; }
 .reorderable-row-main:active, body.list-reordering .reorderable-row-main { cursor: grabbing; }
 .project-card-main > span:last-child, .project-card.editing > span:last-child, .item-row-main > span:last-child { display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
-.project-card b, .item-row b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 550; }
-.project-card small, .item-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--muted); margin-top: 2px; }
-.project-card-editor { height: 32px; }
-.project-card-editor small { margin-top: 2px; line-height: 11px; }
+.project-card b, .item-row b { min-height: 17px; flex: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; line-height: 17px; font-weight: 550; }
+.project-card small, .item-row small { min-height: 14px; flex: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; line-height: 14px; color: var(--muted); margin-top: 1px; }
+.project-card-editor { height: 34px; }
+.project-card-editor small { margin-top: 1px; line-height: 14px; }
 .project-card-name-input { width: 100%; min-width: 0; height: 19px; flex: none; padding: 0 5px; border: 1px solid rgba(231,184,114,.48); border-radius: 4px; background: #211e1a; color: #eee9df; font-size: 13px; font-weight: 550; line-height: 17px; cursor: text; }
 .project-card-name-input:focus { border-color: rgba(231,184,114,.78); background: #28231d; }
 .project-card-name-input:focus-visible { outline: none; }
@@ -129,8 +166,8 @@ button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke
 .project-card.drop-after::after, .item-row.drop-after::after { bottom: -3px; }
 .item-row:hover, .item-row.active { background: rgba(255,255,255,.04); }
 .item-row.active { border-color: rgba(231,184,114,.2); }
-.item-row-main { flex: 1; min-width: 0; height: 30px; overflow: hidden; padding: 0; border: 0; background: transparent; display: flex; align-items: center; gap: 9px; text-align: left; cursor: pointer; }
-.case-row .item-row-main { height: 34px; }
+.item-row-main { flex: 1; min-width: 0; height: 34px; overflow: hidden; padding: 0; border: 0; background: transparent; display: flex; align-items: center; gap: 9px; text-align: left; cursor: pointer; }
+.case-row .item-row-main { height: 36px; }
 .item-row-actions { display: flex; flex: none; align-items: center; gap: 2px; }
 .item-row-action { width: 25px; height: 27px; padding: 0; border: 1px solid transparent; border-radius: 5px; background: transparent; color: #877f75; display: grid; place-items: center; cursor: pointer; }
 .item-row-action svg { width: 16px; height: 16px; stroke-width: 1.9; }
@@ -213,14 +250,14 @@ button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke
 .object-library-card:hover, .object-library-card:focus-visible { border-color: rgba(231,184,114,.34); background: rgba(231,184,114,.065); color: #e4ddd3; }
 .object-library-card > img { display: block; width: 100%; aspect-ratio: 144 / 88; object-fit: cover; border: 1px solid rgba(255,255,255,.06); border-radius: 5px; background: #211f1c; }
 .object-library-card > span:last-child { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.object-library-card b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
+.object-library-card b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 16px; font-weight: 600; }
 .object-library-card small { overflow: hidden; color: var(--muted); font-size: 10px; line-height: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .object-library-import { width: 100%; min-width: 0; height: 48px; margin-top: 9px; padding: 0 12px; flex: none; border: 1px solid var(--line); border-radius: 7px; background: rgba(0,0,0,.1); color: #bbb3a9; display: flex; align-items: center; gap: 10px; text-align: left; cursor: pointer; }
 .object-library-import:hover { border-color: rgba(231,184,114,.3); background: rgba(231,184,114,.055); color: #e5ddd3; }
 .object-library-import > svg { width: 17px; height: 17px; color: var(--accent); flex: none; }
 .object-library-import > span { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.object-library-import b { font-size: 12px; font-weight: 600; }
-.object-library-import small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 10px; }
+.object-library-import b { font-size: 12px; line-height: 16px; font-weight: 600; }
+.object-library-import small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 10px; line-height: 14px; }
 .save-status { flex: none; min-width: 73px; white-space: nowrap; font-size: 11px; color: #807a72; text-align: right; }
 .save-status.saving { color: var(--accent); }
 .display-visibility-button { flex: none; border-color: var(--line); color: #777169; }
@@ -299,7 +336,7 @@ button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke
 .inspector { border-left: 1px solid var(--line); min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
 .inspector-content { flex: 1; min-height: 0; overflow-y: auto; padding: 17px 15px; }
 .inspector-heading { height: 25px; }
-.format-pill { text-transform: uppercase; font-size: 10px; padding: 3px 6px; border-radius: 4px; background: #333a4c; color: #c7cee3; }
+.format-pill { text-transform: uppercase; font-size: 10px; line-height: 14px; padding: 3px 6px; border-radius: 4px; background: #333a4c; color: #c7cee3; }
 .format-pill.image { background: #4b3934; color: #e1c2b9; }
 .format-pill.builtin { background: #4a4032; color: #dec398; }
 .empty-inspector { height: 210px; display: grid; place-content: center; justify-items: center; text-align: center; color: var(--muted); padding: 25px; }
@@ -417,10 +454,6 @@ select { width: 100%; height: 31px; border: 1px solid var(--line); border-radius
   .case-picker-trigger { width: 146px; }
   .save-status { min-width: 67px; }
 }
-
-:lang(ja) .project-card { height: 50px; }
-:lang(ja) .item-row-main { height: 33px; }
-:lang(ja) .case-row .item-row-main { height: 37px; }
 
 @media (max-width: 1160px) {
   .editor-shell { grid-template-columns: 212px minmax(480px, 1fr) 300px; }

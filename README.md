@@ -30,7 +30,7 @@ npm run dist:dir
 - Revision-ordered local save, immediate editor-to-widget previews, project clear/reset, `.uvd` backup/restore, and PNG capture
 - Three.js rendering for display-case presets and imported assets
 - Rapier gravity, simplified collision, stacking, automatic sleeping, per-item collision bypass, prevent-toppling, and placement lock
-- GLB, GLTF, VRM, FBX, OBJ, PNG, JPG, and WebP import
+- GLB, GLTF, VRM, FBX, OBJ, STL, PNG, JPG, and WebP import
 - Acrylic stand, panel, frame, and photo-card presentation for 2D images, including contour/rectangle/ellipse acrylic plates and numeric margins
 - Korean, English, Japanese, and Simplified Chinese interface resources
 - First-run onboarding, keyboard shortcuts, and user-exported local diagnostics
