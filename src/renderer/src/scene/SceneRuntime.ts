@@ -7,6 +7,7 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js'
 import { MTLLoader } from 'three/examples/jsm/loaders/MTLLoader.js'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
+import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
@@ -54,6 +55,7 @@ import {
 import { isPhysicsSceneHydrated, restoredItemSupportPriority } from './sceneHydration'
 import { pickSceneSelection, transformAxisAtPointer } from './sceneSelection'
 import { prepareImportedModelForScene } from './importedModel'
+import { createStlMesh } from './stlModel'
 
 interface SceneCallbacks {
   onSelect: (id: string | null) => void
@@ -1006,6 +1008,9 @@ export class SceneRuntime {
       const fbx = await new FBXLoader(manager).loadAsync(item.assetUrl)
       content = fbx
       clips = fbx.animations
+    } else if (item.format === 'stl') {
+      const geometry = await new STLLoader(manager).loadAsync(item.assetUrl)
+      content = createStlMesh(geometry)
     } else {
       content = await this.loadObjWithMaterials(item.assetUrl, manager)
     }

@@ -1,7 +1,7 @@
 import { readFile, stat } from 'node:fs/promises'
 import { dirname, extname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path'
 
-export const MODEL_EXTENSIONS = new Set(['glb', 'gltf', 'vrm', 'fbx', 'obj'])
+export const MODEL_EXTENSIONS = new Set(['glb', 'gltf', 'vrm', 'fbx', 'obj', 'stl'])
 export const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp'])
 export const SUPPORT_EXTENSIONS = new Set(['bin', 'mtl'])
 

@@ -37,6 +37,7 @@ describe('asset responses', () => {
   it('reports useful content types for linked model resources', () => {
     expect(assetContentType('figure.glb')).toBe('model/gltf-binary')
     expect(assetContentType('figure.gltf')).toBe('model/gltf+json')
+    expect(assetContentType('figure.stl')).toBe('model/stl')
     expect(assetContentType('texture.ktx2')).toBe('image/ktx2')
     expect(assetContentType('unknown.data')).toBe('application/octet-stream')
   })

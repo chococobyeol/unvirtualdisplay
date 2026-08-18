@@ -67,4 +67,17 @@ describe('planAssetImports', () => {
       { kind: 'image', extension: 'png', entryRelativePath: 'standee.png' }
     ])
   })
+
+  it('imports STL as a standalone model without linked resources', async () => {
+    const root = await temporaryRoot()
+    const model = join(root, 'sculpture.stl')
+    await writeFile(model, 'solid sculpture\nendsolid sculpture\n')
+
+    expect(await planAssetImports([model])).toMatchObject([{
+      kind: 'model',
+      extension: 'stl',
+      entryRelativePath: 'sculpture.stl',
+      files: [{ sourcePath: model, relativePath: 'sculpture.stl' }]
+    }])
+  })
 })

@@ -448,6 +448,37 @@ describe('ProjectStore', () => {
     expect(await readFile(copiedPath, 'utf8')).toContain('o Figure')
   })
 
+  it('round-trips an STL model through a project archive', async () => {
+    const store = await createStore()
+    const project = await store.getActiveProject()
+    const source = join(temporaryRoots[0], 'printable-figure.stl')
+    const stl = 'solid figure\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid figure\n'
+    await writeFile(source, stl, 'utf8')
+    const [asset] = await store.importFiles(project.id, [source])
+    project.items.push({
+      id: crypto.randomUUID(),
+      name: asset.name,
+      kind: 'model',
+      format: asset.extension,
+      assetUrl: asset.assetUrl,
+      relativePath: asset.relativePath,
+      transform: {
+        position: { x: 0, y: 0, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 }
+      },
+      physics: { collision: true, preventToppling: true, placementLocked: false },
+      animation: { enabled: false, clipIndex: 0, loop: true, speed: 1 }
+    })
+    await store.saveProject(project)
+
+    const restored = await store.importProjectArchive(await store.exportProjectArchive(project.id))
+    const restoredItem = restored.project.items[0]
+
+    expect(restoredItem).toMatchObject({ kind: 'model', format: 'stl' })
+    expect(await readFile(store.resolveAssetPath(restored.project.id, restoredItem.relativePath), 'utf8')).toBe(stl)
+  })
+
   it('rejects paths that escape a project asset folder', async () => {
     const store = await createStore()
     const project = await store.getActiveProject()

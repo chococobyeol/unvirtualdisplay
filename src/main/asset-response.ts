@@ -18,6 +18,7 @@ const CONTENT_TYPES: Readonly<Record<string, string>> = {
   '.mtl': 'text/plain; charset=utf-8',
   '.obj': 'text/plain; charset=utf-8',
   '.png': 'image/png',
+  '.stl': 'model/stl',
   '.svg': 'image/svg+xml',
   '.tga': 'image/x-tga',
   '.vrm': 'model/gltf-binary',
