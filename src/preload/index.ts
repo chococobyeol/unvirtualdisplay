@@ -39,6 +39,11 @@ const api: UnvirtualApi = {
   resetDisplayBounds: () => ipcRenderer.invoke('display:reset-bounds'),
   showDisplayContextMenu: () => ipcRenderer.send('display:show-context-menu'),
   setDisplayPointerIgnored: (ignored) => ipcRenderer.send('display:set-pointer-ignored', ignored),
+  onDisplayPointerPosition: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, point: { x: number; y: number }): void => listener(point)
+    ipcRenderer.on('display:pointer-position', handler)
+    return () => ipcRenderer.removeListener('display:pointer-position', handler)
+  },
   startDisplayResize: (edge: DisplayResizeEdge, point) => ipcRenderer.send('display:resize-start', edge, point),
   updateDisplayResize: (point) => ipcRenderer.send('display:resize-update', point),
   endDisplayResize: () => ipcRenderer.send('display:resize-end'),

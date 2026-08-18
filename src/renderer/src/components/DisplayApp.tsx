@@ -18,7 +18,7 @@ export function DisplayApp(): React.JSX.Element | null {
   useEffect(() => {
     if (!project || !settings || settings.clickThrough || editing) return
     let frame = 0
-    let latestEvent: MouseEvent | null = null
+    let latestPoint: { clientX: number; clientY: number; buttons: number } | null = null
     const setIgnored = (ignored: boolean): void => {
       if (lastIgnored.current === ignored) return
       lastIgnored.current = ignored
@@ -26,10 +26,10 @@ export function DisplayApp(): React.JSX.Element | null {
     }
     const sample = (): void => {
       frame = 0
-      const event = latestEvent
+      const point = latestPoint
       const canvas = document.querySelector<HTMLCanvasElement>('.display-shell .scene-canvas')
-      if (!event || !canvas) return
-      if (event.buttons !== 0) {
+      if (!point || !canvas) return
+      if (point.buttons !== 0) {
         setIgnored(false)
         return
       }
@@ -43,27 +43,33 @@ export function DisplayApp(): React.JSX.Element | null {
         return
       }
       const bounds = canvas.getBoundingClientRect()
-      const x = Math.max(0, Math.min(canvas.width - 1, Math.floor((event.clientX - bounds.left) * canvas.width / bounds.width)))
-      const y = Math.max(0, Math.min(canvas.height - 1, Math.floor((bounds.bottom - event.clientY) * canvas.height / bounds.height)))
+      const x = Math.max(0, Math.min(canvas.width - 1, Math.floor((point.clientX - bounds.left) * canvas.width / bounds.width)))
+      const y = Math.max(0, Math.min(canvas.height - 1, Math.floor((bounds.bottom - point.clientY) * canvas.height / bounds.height)))
       const pixel = new Uint8Array(4)
       context.readPixels(x, y, 1, 1, context.RGBA, context.UNSIGNED_BYTE, pixel)
       setIgnored(pixel[3] < 12)
     }
-    const handleMove = (event: MouseEvent): void => {
-      latestEvent = event
+    const queueSample = (point: { clientX: number; clientY: number; buttons: number }): void => {
+      latestPoint = point
       if (!frame) frame = requestAnimationFrame(sample)
     }
+    const handleMove = (event: MouseEvent): void => queueSample(event)
     if (project.background.mode !== 'transparent') {
       lastIgnored.current = false
       window.unvirtual.setDisplayPointerIgnored(false)
+      return
     }
+    const removePointerPositionListener = window.unvirtual.onDisplayPointerPosition((point) => {
+      queueSample({ clientX: point.x, clientY: point.y, buttons: 0 })
+    })
     window.addEventListener('mousemove', handleMove, { passive: true })
     return () => {
       window.removeEventListener('mousemove', handleMove)
+      removePointerPositionListener()
       if (frame) cancelAnimationFrame(frame)
       lastIgnored.current = null
     }
-  }, [editing, project, settings])
+  }, [editing, project?.background.mode, settings?.clickThrough])
 
   useEffect(() => {
     if (!settings || settings.clickThrough) return

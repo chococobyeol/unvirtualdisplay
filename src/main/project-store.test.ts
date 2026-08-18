@@ -485,4 +485,36 @@ describe('ProjectStore', () => {
     expect(restored.project.items[0].assetUrl).toContain(restored.project.id)
     expect(await readFile(store.resolveAssetPath(restored.project.id, asset.relativePath), 'utf8')).toContain('Archived')
   })
+
+  it('round-trips an image whose extracted Windows path exceeds MAX_PATH', async () => {
+    const store = await createStore()
+    const project = await store.getActiveProject()
+    const source = join(temporaryRoots[0], `${'pokemon-image-'.repeat(12)}.webp`)
+    const bytes = Uint8Array.from([0x52, 0x49, 0x46, 0x46, 0x04, 0, 0, 0, 0x57, 0x45, 0x42, 0x50])
+    await writeFile(source, bytes)
+    const [asset] = await store.importFiles(project.id, [source])
+    project.items.push({
+      id: crypto.randomUUID(),
+      name: asset.name,
+      kind: 'image',
+      format: 'webp',
+      assetUrl: asset.assetUrl,
+      relativePath: asset.relativePath,
+      transform: {
+        position: { x: 0, y: 0, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 }
+      },
+      physics: { collision: true, preventToppling: true, placementLocked: false },
+      animation: { enabled: false, clipIndex: 0, loop: true, speed: 1 }
+    })
+    await store.saveProject(project)
+
+    const restored = await store.importProjectArchive(await store.exportProjectArchive(project.id))
+    const restoredItem = restored.project.items[0]
+    const representativeWindowsRoot = String.raw`C:\Users\tester\AppData\Roaming\Unvirtual Display\projects\${restored.project.id}\assets`
+
+    expect(join(representativeWindowsRoot, restoredItem.relativePath).length).toBeGreaterThan(260)
+    expect(new Uint8Array(await readFile(store.resolveAssetPath(restored.project.id, restoredItem.relativePath)))).toEqual(bytes)
+  })
 })

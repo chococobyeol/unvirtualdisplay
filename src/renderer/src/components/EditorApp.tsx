@@ -77,6 +77,7 @@ import {
   type ObjectCatalogGroup,
   type ObjectLibraryCategory
 } from '../objectCatalog'
+import { approveCaseChange } from '../caseChange'
 import { reorderById, type ReorderPlacement } from '../reorder'
 import { getCaseLayout } from '../scene/caseLayout'
 import { useAppStore } from '../store'
@@ -318,7 +319,7 @@ function CasePresetControl({
   shelfGroupLabel: string
   acrylicGroupLabel: string
   getName: (preset: CasePreset) => string
-  onChange: (preset: CasePreset) => void
+  onChange: (preset: CasePreset) => boolean
 }): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const controlRef = useRef<HTMLDivElement>(null)
@@ -372,7 +373,7 @@ function CasePresetControl({
     aria-selected={value === preset}
     title={getName(preset)}
     onClick={() => {
-      if (preset !== value) onChange(preset)
+      if (preset !== value && !onChange(preset)) return
       setOpen(false)
       window.requestAnimationFrame(() => triggerRef.current?.focus())
     }}
@@ -1432,21 +1433,25 @@ export function EditorApp(): React.JSX.Element | null {
 
   if (!project || !settings) return null
 
-  const changeCase = (casePreset: CasePreset): void => mutate((draft) => {
-    if (draft.casePreset === casePreset) return
-    const previousLayout = getCaseLayout(draft.casePreset)
-    const nextLayout = getCaseLayout(casePreset)
-    const localOffset = (nextLayout.cameraOffsetY - previousLayout.cameraOffsetY) * draft.displayTransform.scale.y
-    const rotation = draft.displayTransform.rotation
-    const offset = new THREE.Vector3(0, localOffset, 0).applyEuler(new THREE.Euler(rotation.x, rotation.y, rotation.z))
-    draft.camera.position.x += offset.x
-    draft.camera.position.y += offset.y
-    draft.camera.position.z += offset.z
-    draft.camera.target.x += offset.x
-    draft.camera.target.y += offset.y
-    draft.camera.target.z += offset.z
-    draft.casePreset = casePreset
-  })
+  const changeCase = (casePreset: CasePreset): boolean => {
+    if (project.casePreset === casePreset) return true
+    if (!approveCaseChange(project.items.length, () => window.confirm(t('changeCaseConfirm')))) return false
+    mutate((draft) => {
+      const previousLayout = getCaseLayout(draft.casePreset)
+      const nextLayout = getCaseLayout(casePreset)
+      const localOffset = (nextLayout.cameraOffsetY - previousLayout.cameraOffsetY) * draft.displayTransform.scale.y
+      const rotation = draft.displayTransform.rotation
+      const offset = new THREE.Vector3(0, localOffset, 0).applyEuler(new THREE.Euler(rotation.x, rotation.y, rotation.z))
+      draft.camera.position.x += offset.x
+      draft.camera.position.y += offset.y
+      draft.camera.position.z += offset.z
+      draft.camera.target.x += offset.x
+      draft.camera.target.y += offset.y
+      draft.camera.target.z += offset.z
+      draft.casePreset = casePreset
+    })
+    return true
+  }
   const changeLighting = (value: number): void => mutate((draft) => { draft.lighting.intensity = value }, false)
   const resetCamera = (): void => {
     mutate((draft) => {

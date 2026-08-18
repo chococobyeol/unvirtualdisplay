@@ -25,6 +25,7 @@ import { cameraSettingsEqual, shouldApplySyncedCamera } from '../../../shared/ca
 import { findOpenFloorPosition, findOpenImportPosition, fitImportedItemScale, isPlacementBelowSafetyFloor } from './itemPlacement'
 import { getCaseLayout } from './caseLayout'
 import { createBuiltInObject, createDisplayCaseObject, type ColliderBox } from './builtInObjects'
+import { inverseDisplayScale, scaleCaseCollider } from './displayScale'
 import { createClearAcrylicMaterial } from './acrylicMaterial'
 import {
   acrylicOffsetPixelRadius,
@@ -372,6 +373,8 @@ export class SceneRuntime {
   private readonly items = new Map<string, RuntimeItem>()
   private readonly pendingItemLoads = new Map<string, symbol>()
   private readonly staticBodies: RAPIER.RigidBody[] = []
+  private caseColliders: readonly ColliderBox[] = []
+  private readonly caseColliderScale = new THREE.Vector3(Number.NaN, Number.NaN, Number.NaN)
   private readonly dracoLoader = new DRACOLoader()
   private readonly ktx2Loader = new KTX2Loader()
   private world: RAPIER.World | null = null
@@ -546,12 +549,15 @@ export class SceneRuntime {
     this.projectId = project.id
 
     const displayTransform = project.displayTransform ?? createDefaultDisplayTransform()
+    const previousDisplayScale = this.displayRoot.scale.clone()
     if (transformsDiffer(transformOf(this.displayRoot), displayTransform)) {
       this.displayRoot.position.copy(vector3(displayTransform.position))
       this.displayRoot.rotation.set(displayTransform.rotation.x, displayTransform.rotation.y, displayTransform.rotation.z)
       this.displayRoot.scale.copy(vector3(displayTransform.scale))
       this.displayRoot.updateMatrixWorld(true)
     }
+    const displayScaleChanged = !previousDisplayScale.equals(this.displayRoot.scale)
+    this.compensateItemLayerScale()
 
     const runtimeCamera = {
       position: { x: this.camera.position.x, y: this.camera.position.y, z: this.camera.position.z },
@@ -565,6 +571,8 @@ export class SceneRuntime {
     this.updateLighting(project)
     if (this.casePreset !== project.casePreset || (this.world && this.staticBodies.length === 0)) {
       this.buildCase(project.casePreset)
+    } else if (displayScaleChanged) {
+      this.rebuildCasePhysics()
     }
     this.caseLayer.visible = project.caseVisible !== false
 
@@ -606,7 +614,7 @@ export class SceneRuntime {
     // selection before pointerup.
     if (this.draggingTransform) return
     if (id === DISPLAY_CASE_SELECTION_ID) {
-      this.selectionHelper.setFromObject(this.displayRoot)
+      this.selectionHelper.setFromObject(this.caseLayer)
       const caseVisible = this.project?.caseVisible !== false
       this.selectionHelper.visible = this.variant === 'editor' && caseVisible
       if (caseVisible) this.transformControls?.attach(this.displayRoot)
@@ -839,11 +847,9 @@ export class SceneRuntime {
     this.casePreset = preset
     disposeObject(this.caseLayer)
     this.caseLayer.clear()
-    if (this.world) {
-      for (const body of this.staticBodies.splice(0)) this.removePhysicsBody(body)
-    }
 
     const builtCase = createDisplayCaseObject(preset)
+    this.caseColliders = builtCase.colliders
     this.caseLayer.add(builtCase.root)
     const layout = getCaseLayout(preset)
 
@@ -858,10 +864,28 @@ export class SceneRuntime {
       this.caseLayer.add(grid)
     }
 
-    for (const part of builtCase.colliders) this.addStaticCollider(part.halfExtents, part.position)
-    // A wide invisible floor sits directly beneath the case base so items that
-    // fall over an edge settle below the display instead of falling forever.
-    this.addStaticCollider([24, 0.08, 24], [0, layout.placementBounds.floorSurface - 0.08, 0])
+    this.rebuildCasePhysics()
+  }
+
+  private compensateItemLayerScale(): void {
+    const inverse = inverseDisplayScale(this.displayRoot.scale)
+    this.itemLayer.scale.set(inverse.x, inverse.y, inverse.z)
+    this.itemLayer.updateMatrixWorld(true)
+  }
+
+  private rebuildCasePhysics(): void {
+    if (!this.world || !this.casePreset) return
+    for (const body of this.staticBodies.splice(0)) this.removePhysicsBody(body)
+    const scale = this.displayRoot.scale
+    for (const part of this.caseColliders) {
+      const scaled = scaleCaseCollider(part, scale)
+      this.addStaticCollider(scaled.halfExtents, scaled.position)
+    }
+    // A wide invisible floor sits directly beneath the scaled case base so
+    // items that fall over an edge settle below the display instead of falling forever.
+    const floorSurface = getCaseLayout(this.casePreset).placementBounds.floorSurface * scale.y
+    this.addStaticCollider([24, 0.08, 24], [0, floorSurface - 0.08, 0])
+    this.caseColliderScale.copy(scale)
     for (const runtime of this.items.values()) runtime.body?.wakeUp()
   }
 
@@ -1517,6 +1541,8 @@ export class SceneRuntime {
     if (transformId === DISPLAY_CASE_SELECTION_ID) {
       this.dragTarget = null
       if (!dragging) {
+        this.compensateItemLayerScale()
+        if (!this.caseColliderScale.equals(this.displayRoot.scale)) this.rebuildCasePhysics()
         this.callbacks.onTransform(DISPLAY_CASE_SELECTION_ID, transformOf(this.displayRoot), true)
         this.activeTransformId = null
         this.setSelection(this.selectedId)
@@ -1598,6 +1624,8 @@ export class SceneRuntime {
 
   private handleTransformObjectChange(): void {
     if (this.activeTransformId === DISPLAY_CASE_SELECTION_ID && this.draggingTransform) {
+      this.compensateItemLayerScale()
+      if (!this.caseColliderScale.equals(this.displayRoot.scale)) this.rebuildCasePhysics()
       this.selectionHelper.update()
       return
     }

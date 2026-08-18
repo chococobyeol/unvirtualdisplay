@@ -1,5 +1,4 @@
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import {
   app,
   BrowserWindow,
@@ -7,7 +6,6 @@ import {
   ipcMain,
   Menu,
   nativeImage,
-  net,
   protocol,
   screen,
   shell,
@@ -24,7 +22,10 @@ import type {
   ProjectPatch,
   ProjectResetScope
 } from '../shared/types'
+import { createAssetResponse } from './asset-response'
+import { shouldRecoverDisplayPointer, toDisplayClientPoint } from './display-pointer'
 import { ProjectStore } from './project-store'
+import { resolveWindowsTrayIconPath } from './tray-icon'
 import { getDefaultDisplayBounds, recoverDisplayBounds } from './window-bounds'
 
 protocol.registerSchemesAsPrivileged([
@@ -47,6 +48,9 @@ let store: ProjectStore
 let isQuitting = false
 let boundsSaveTimer: ReturnType<typeof setTimeout> | null = null
 let displayEditing = false
+let displayPointerIgnored = false
+let displayPointerRecoveryTimer: ReturnType<typeof setInterval> | null = null
+let lastDisplayPointerPosition: { x: number; y: number } | null = null
 let displayVisible = true
 let displayResize: {
   edge: DisplayResizeEdge
@@ -352,20 +356,28 @@ async function createDisplayWindow(): Promise<BrowserWindow> {
   })
   displayWindow = window
 
-  window.setIgnoreMouseEvents(settings.clickThrough, { forward: true })
+  setDisplayPointerIgnored(settings.clickThrough)
   attachDiagnostics(window, 'display')
   window.once('ready-to-show', () => {
     if (displayVisible && settings.onboardingComplete && !isQuitting && !window.isDestroyed()) window.showInactive()
     publishDisplayVisibility()
   })
-  window.on('show', publishDisplayVisibility)
-  window.on('hide', publishDisplayVisibility)
+  window.on('show', () => {
+    publishDisplayVisibility()
+    refreshDisplayPointerRecovery()
+  })
+  window.on('hide', () => {
+    publishDisplayVisibility()
+    refreshDisplayPointerRecovery()
+  })
   window.on('move', queueDisplayBoundsSave)
   window.on('resize', queueDisplayBoundsSave)
   window.on('closed', () => {
     if (displayWindow === window) {
       displayWindow = null
       displayEditing = false
+      displayPointerIgnored = false
+      clearDisplayPointerRecovery()
       displayResize = null
       displayMove = null
     }
@@ -437,7 +449,7 @@ function broadcastExcept(sender: Electron.WebContents, channel: string, payload:
 function applyDisplaySettings(settings: AppSettings): void {
   if (!displayWindow || displayWindow.isDestroyed()) return
   displayWindow.setAlwaysOnTop(settings.alwaysOnTop)
-  displayWindow.setIgnoreMouseEvents(displayEditing ? false : settings.clickThrough, { forward: true })
+  setDisplayPointerIgnored(displayEditing ? false : settings.clickThrough)
 }
 
 function setDisplayEditing(editing: boolean): void {
@@ -445,9 +457,52 @@ function setDisplayEditing(editing: boolean): void {
   displayEditing = editing
   displayResize = null
   displayMove = null
-  displayWindow.setIgnoreMouseEvents(editing ? false : store.settings.clickThrough, { forward: true })
+  setDisplayPointerIgnored(editing ? false : store.settings.clickThrough)
   displayWindow.webContents.send('display:editing-changed', editing)
   if (editing) displayWindow.show()
+}
+
+function clearDisplayPointerRecovery(): void {
+  lastDisplayPointerPosition = null
+  if (!displayPointerRecoveryTimer) return
+  clearInterval(displayPointerRecoveryTimer)
+  displayPointerRecoveryTimer = null
+}
+
+function sendDisplayPointerPosition(): void {
+  if (!displayWindow || displayWindow.isDestroyed() || !displayWindow.isVisible()) return
+  const point = toDisplayClientPoint(screen.getCursorScreenPoint(), displayWindow.getBounds())
+  if (!point) {
+    lastDisplayPointerPosition = null
+    return
+  }
+  if (lastDisplayPointerPosition?.x === point.x && lastDisplayPointerPosition.y === point.y) return
+  lastDisplayPointerPosition = point
+  displayWindow.webContents.send('display:pointer-position', point)
+}
+
+function refreshDisplayPointerRecovery(): void {
+  const shouldRecover = shouldRecoverDisplayPointer({
+    platform: process.platform,
+    pointerIgnored: displayPointerIgnored,
+    editing: displayEditing,
+    clickThrough: store.settings.clickThrough,
+    visible: Boolean(displayWindow && !displayWindow.isDestroyed() && displayWindow.isVisible())
+  })
+  if (!shouldRecover) {
+    clearDisplayPointerRecovery()
+    return
+  }
+  if (displayPointerRecoveryTimer) return
+  sendDisplayPointerPosition()
+  displayPointerRecoveryTimer = setInterval(sendDisplayPointerPosition, 16)
+}
+
+function setDisplayPointerIgnored(ignored: boolean): void {
+  if (!displayWindow || displayWindow.isDestroyed()) return
+  displayPointerIgnored = ignored
+  displayWindow.setIgnoreMouseEvents(ignored, { forward: true })
+  refreshDisplayPointerRecovery()
 }
 
 function registerIpc(): void {
@@ -647,7 +702,7 @@ function registerIpc(): void {
   })
   ipcMain.on('display:set-pointer-ignored', (event, ignored: boolean) => {
     if (event.sender !== displayWindow?.webContents || displayEditing || displayMove || store.settings.clickThrough) return
-    displayWindow.setIgnoreMouseEvents(ignored, { forward: true })
+    setDisplayPointerIgnored(ignored)
   })
   ipcMain.on('display:resize-start', (event, edge: DisplayResizeEdge, point: { x: number; y: number }) => {
     if (event.sender !== displayWindow?.webContents || !displayEditing || !displayWindow) return
@@ -684,7 +739,7 @@ function registerIpc(): void {
   })
   ipcMain.on('display:move-start', (event, point: { x: number; y: number }) => {
     if (event.sender !== displayWindow?.webContents || !displayWindow || (!displayEditing && store.settings.clickThrough)) return
-    displayWindow.setIgnoreMouseEvents(false, { forward: true })
+    setDisplayPointerIgnored(false)
     displayMove = { start: point, bounds: displayWindow.getBounds() }
   })
   ipcMain.on('display:move-update', (event, point: { x: number; y: number }) => {
@@ -738,9 +793,19 @@ function refreshTrayMenu(): void {
 }
 
 function createTray(): void {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22"><path fill="#fff" d="M3 3h16v16H3zm2 2v12h12V5zm2 2h8v2H7zm0 4h3v4H7zm5 0h3v4h-3z"/></svg>`
-  const icon = nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`)
-  icon.setTemplateImage(process.platform === 'darwin')
+  let icon: Electron.NativeImage
+  if (process.platform === 'win32') {
+    const iconPath = resolveWindowsTrayIconPath(app.isPackaged, app.getAppPath(), process.resourcesPath)
+    icon = nativeImage.createFromPath(iconPath)
+    if (icon.isEmpty()) {
+      addDiagnostic(`Windows tray icon failed to load: ${iconPath}`)
+      console.error(`Windows tray icon failed to load: ${iconPath}`)
+    }
+  } else {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22"><path fill="#fff" d="M3 3h16v16H3zm2 2v12h12V5zm2 2h8v2H7zm0 4h3v4H7zm5 0h3v4h-3z"/></svg>`
+    icon = nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`)
+    icon.setTemplateImage(process.platform === 'darwin')
+  }
   tray = new Tray(icon)
   refreshTrayMenu()
   tray.setToolTip('Unvirtual Display')
@@ -766,7 +831,7 @@ app.whenReady().then(async () => {
   await store.initialize()
   displayVisible = store.settings.displayVisible
 
-  protocol.handle('uvd', (request) => {
+  protocol.handle('uvd', async (request) => {
     try {
       const url = new URL(request.url)
       if (url.host !== 'asset') return new Response('Not found', { status: 404 })
@@ -774,8 +839,9 @@ app.whenReady().then(async () => {
       if (!encodedProjectId || pathParts.length === 0) return new Response('Not found', { status: 404 })
       const projectId = decodeURIComponent(encodedProjectId)
       const relativePath = pathParts.map(decodeURIComponent).join('/')
-      return net.fetch(pathToFileURL(store.resolveAssetPath(projectId, relativePath)).toString())
-    } catch {
+      return await createAssetResponse(store.resolveAssetPath(projectId, relativePath), request.method)
+    } catch (error) {
+      addDiagnostic(`Asset request failed: ${error instanceof Error ? error.message : String(error)}`)
       return new Response('Bad request', { status: 400 })
     }
   })

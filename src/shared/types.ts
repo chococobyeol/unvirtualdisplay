@@ -278,6 +278,7 @@ export interface UnvirtualApi {
   resetDisplayBounds: () => Promise<void>
   showDisplayContextMenu: () => void
   setDisplayPointerIgnored: (ignored: boolean) => void
+  onDisplayPointerPosition: (listener: (point: { x: number; y: number }) => void) => () => void
   startDisplayResize: (edge: DisplayResizeEdge, point: { x: number; y: number }) => void
   updateDisplayResize: (point: { x: number; y: number }) => void
   endDisplayResize: () => void
