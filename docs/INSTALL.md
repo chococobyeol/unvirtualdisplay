@@ -4,21 +4,21 @@ Unvirtual Display 0.1.0 is distributed without paid Windows or Apple code signin
 
 ## macOS — Apple Silicon
 
-Open `Unvirtual Display-0.1.0-arm64.dmg`, then drag Unvirtual Display to Applications. Because the app is not signed or notarized, macOS can block the first launch. Try opening the app once, then open **System Settings → Privacy & Security**, scroll to Security, and choose **Open Anyway** only if the download source and checksum are trusted. Apple documents this process in [Open an app by overriding security settings](https://support.apple.com/guide/mac-help/open-an-app-by-overriding-security-settings-mh40617/mac).
+Open `Unvirtual-Display-0.1.0-macOS-Apple-Silicon-r3.dmg`, then drag Unvirtual Display to Applications. Because the app is ad-hoc signed but not notarized, macOS can block the first launch. Try opening the app once, then open **System Settings → Privacy & Security**, scroll to Security, and choose **Open Anyway** only if the download source and checksum are trusted. Apple documents this process in [Open an app by overriding security settings](https://support.apple.com/guide/mac-help/open-an-app-by-overriding-security-settings-mh40617/mac).
 
 Unsigned software has not been verified by Apple. Do not override the warning for a file obtained from another source or with a mismatched checksum.
 
 ## Windows 10/11 x64
 
-Run `Unvirtual Display Setup 0.1.0.exe` and follow the installer. The per-machine installer may request administrator permission and lets you choose the installation directory. Windows Defender SmartScreen can warn that the publisher is unknown because the installer is unsigned. Check the source and SHA-256 checksum before choosing any option to continue. Do not disable SmartScreen or other system-wide security protection. Microsoft explains reputation-based warnings in [Protect my PC from viruses](https://support.microsoft.com/en-us/office/protect-my-pc-from-viruses).
+Run `Unvirtual-Display-0.1.0-Windows-x64-Installer-r2.exe` and follow the installer. The per-machine installer may request administrator permission and lets you choose the installation directory. Windows Defender SmartScreen can warn that the publisher is unknown because the installer is unsigned. Check the source and SHA-256 checksum before choosing any option to continue. Do not disable SmartScreen or other system-wide security protection. Microsoft explains reputation-based warnings in [Protect my PC from viruses](https://support.microsoft.com/en-us/office/protect-my-pc-from-viruses).
 
 ## Linux x64
 
-Make `Unvirtual Display-0.1.0.AppImage` executable, then run it:
+Make `Unvirtual-Display-0.1.0-Linux-x64-r3.AppImage` executable, then run it:
 
 ```bash
-chmod +x "Unvirtual Display-0.1.0.AppImage"
-./"Unvirtual Display-0.1.0.AppImage"
+chmod +x "Unvirtual-Display-0.1.0-Linux-x64-r3.AppImage"
+./"Unvirtual-Display-0.1.0-Linux-x64-r3.AppImage"
 ```
 
 Some distributions may require FUSE 2 compatibility to launch an AppImage.
@@ -26,9 +26,9 @@ Some distributions may require FUSE 2 compatibility to launch an AppImage.
 ## SHA-256 checksums
 
 ```text
-505afb0642b17101e492b0b57e2c848da4b8da26c26133e5c8ffaf5977f46e77  Unvirtual Display-0.1.0-arm64.dmg
-4f151360315efe6439634a0973d6b090cf43c7fb7739d7ae09ebc3d1de06d7ec  Unvirtual Display Setup 0.1.0.exe
-d1e3174952bd314c1b23c2dcaa57c6baf5d1585086180b58d67709d958ff3ba5  Unvirtual Display-0.1.0.AppImage
+537e30a6ce5ffbc86c7f68f354bf6a5a69e41997493b1c4dcdc581505189e0e9  Unvirtual-Display-0.1.0-macOS-Apple-Silicon-r3.dmg
+4f151360315efe6439634a0973d6b090cf43c7fb7739d7ae09ebc3d1de06d7ec  Unvirtual-Display-0.1.0-Windows-x64-Installer-r2.exe
+d1e3174952bd314c1b23c2dcaa57c6baf5d1585086180b58d67709d958ff3ba5  Unvirtual-Display-0.1.0-Linux-x64-r3.AppImage
 ```
 
 ## Updates

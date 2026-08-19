@@ -29,17 +29,22 @@ import { createBuiltInObject, createDisplayCaseObject, type ColliderBox } from '
 import { inverseDisplayScale, scaleCaseCollider } from './displayScale'
 import { createClearAcrylicMaterial } from './acrylicMaterial'
 import {
-  acrylicOffsetPixelRadius,
   acrylicStandBaseDimensions,
   clampAcrylicOffset,
   DEFAULT_ACRYLIC_OFFSET
 } from './acrylicStand'
 import {
+  ACRYLIC_PANEL_DEPTH,
   alphaMaskToCollisionLayout,
   createAcrylicColliderDesc,
   createAcrylicColliderGeometry,
   type AcrylicColliderGeometry
 } from './imageAcrylicCollider'
+import {
+  connectAcrylicMaskComponents,
+  createAcrylicContourCapGeometry,
+  createAcrylicContourGeometry
+} from './acrylicContourGeometry'
 import {
   addBuiltInItemColliders,
   bodyCanSyncSettledTransform,
@@ -95,6 +100,7 @@ interface DragTarget {
 let rapierInitialization: Promise<void> | null = null
 const MAX_CAMERA_DISTANCE = 30
 const RESTORED_PHYSICS_STABILIZATION_FRAMES = 90
+const ACRYLIC_PRINT_SURFACE_GAP = 0.0008
 
 function initializeRapier(): Promise<void> {
   rapierInitialization ??= RAPIER.init()
@@ -272,11 +278,12 @@ function roundedColor(warmth: number): THREE.Color {
 }
 
 interface AcrylicCutout {
-  texture: THREE.CanvasTexture
-  colliderRects: ReturnType<typeof alphaMaskToCollisionLayout>['rectangles']
+  alpha: Uint8ClampedArray
+  width: number
+  height: number
 }
 
-function createAcrylicCutoutTexture(
+function createAcrylicCutout(
   source: CanvasImageSource,
   sourceWidth: number,
   sourceHeight: number,
@@ -284,13 +291,10 @@ function createAcrylicCutoutTexture(
   panelHeight: number,
   offset: number
 ): AcrylicCutout {
-  const scale = Math.min(1, 256 / Math.max(sourceWidth, sourceHeight))
+  const scale = Math.min(1, 384 / Math.max(sourceWidth, sourceHeight))
   const sampleWidth = Math.max(1, Math.round(sourceWidth * scale))
   const sampleHeight = Math.max(1, Math.round(sourceHeight * scale))
   const density = Math.min(sampleWidth / panelWidth, sampleHeight / panelHeight)
-  const radius = acrylicOffsetPixelRadius(offset, density)
-  const width = sampleWidth + radius * 2
-  const height = sampleHeight + radius * 2
 
   const sample = document.createElement('canvas')
   sample.width = sampleWidth
@@ -300,58 +304,83 @@ function createAcrylicCutoutTexture(
   sampleContext.drawImage(source, 0, 0, sampleWidth, sampleHeight)
   const sourcePixels = sampleContext.getImageData(0, 0, sampleWidth, sampleHeight).data
 
-  const alpha = new Uint8ClampedArray(width * height)
+  const alpha = new Uint8ClampedArray(sampleWidth * sampleHeight)
   for (let y = 0; y < sampleHeight; y += 1) {
     for (let x = 0; x < sampleWidth; x += 1) {
-      alpha[(y + radius) * width + x + radius] = sourcePixels[(y * sampleWidth + x) * 4 + 3]
+      alpha[y * sampleWidth + x] = sourcePixels[(y * sampleWidth + x) * 4 + 3]
     }
   }
 
-  const horizontal = new Uint8ClampedArray(alpha.length)
-  const dilated = new Uint8ClampedArray(alpha.length)
-  for (let y = 0; y < height; y += 1) {
-    const row = y * width
-    for (let x = 0; x < width; x += 1) {
-      let maximum = 0
-      for (let dx = -radius; dx <= radius; dx += 1) {
-        const sampleX = x + dx
-        if (sampleX >= 0 && sampleX < width) maximum = Math.max(maximum, alpha[row + sampleX])
-      }
-      horizontal[row + x] = maximum
-    }
+  const connected = connectAcrylicMaskComponents(alpha, sampleWidth, sampleHeight, {
+    bridgeRadius: Math.max(1, Math.min(4, Math.round(Math.max(offset, 0.01) * density * 0.35)))
+  })
+  return {
+    alpha: connected,
+    width: sampleWidth,
+    height: sampleHeight
   }
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      let maximum = 0
-      for (let dy = -radius; dy <= radius; dy += 1) {
-        const sampleY = y + dy
-        if (sampleY >= 0 && sampleY < height) maximum = Math.max(maximum, horizontal[sampleY * width + x])
-      }
-      dilated[y * width + x] = maximum
-    }
-  }
+}
 
-  const output = document.createElement('canvas')
-  output.width = width
-  output.height = height
-  const outputContext = output.getContext('2d')
-  if (!outputContext) throw new Error('Canvas 2D context is unavailable')
-  const outputImage = outputContext.createImageData(width, height)
-  for (let index = 0; index < dilated.length; index += 1) {
-    const pixel = index * 4
-    outputImage.data[pixel] = 224
-    outputImage.data[pixel + 1] = 243
-    outputImage.data[pixel + 2] = 246
-    outputImage.data[pixel + 3] = dilated[index]
+function drawAcrylicContourMask(
+  paths: readonly (readonly THREE.Vector2[])[],
+  worldWidth: number,
+  worldHeight: number,
+  maximumDimension: number
+): HTMLCanvasElement {
+  const canvas = document.createElement('canvas')
+  if (worldWidth >= worldHeight) {
+    canvas.width = maximumDimension
+    canvas.height = Math.max(1, Math.round(maximumDimension * worldHeight / worldWidth))
+  } else {
+    canvas.height = maximumDimension
+    canvas.width = Math.max(1, Math.round(maximumDimension * worldWidth / worldHeight))
   }
-  outputContext.putImageData(outputImage, 0, 0)
-  const texture = new THREE.CanvasTexture(output)
+  const context = canvas.getContext('2d', { willReadFrequently: maximumDimension <= 384 })
+  if (!context) throw new Error('Canvas 2D context is unavailable')
+  context.fillStyle = '#ffffff'
+  context.beginPath()
+  for (const path of paths) {
+    if (path.length < 3) continue
+    const first = path[0]
+    context.moveTo(
+      (first.x / worldWidth + 0.5) * canvas.width,
+      (0.5 - first.y / worldHeight) * canvas.height
+    )
+    for (const point of path.slice(1)) {
+      context.lineTo(
+        (point.x / worldWidth + 0.5) * canvas.width,
+        (0.5 - point.y / worldHeight) * canvas.height
+      )
+    }
+    context.closePath()
+  }
+  context.fill('nonzero')
+  return canvas
+}
+
+function createAcrylicContourMask(
+  paths: readonly (readonly THREE.Vector2[])[],
+  worldWidth: number,
+  worldHeight: number
+): { texture: THREE.CanvasTexture, colliderRects: AcrylicColliderGeometry['panel']['contourRects'] } {
+  const visualMask = drawAcrylicContourMask(paths, worldWidth, worldHeight, 1024)
+  const texture = new THREE.CanvasTexture(visualMask)
   texture.colorSpace = THREE.SRGBColorSpace
-  texture.minFilter = THREE.LinearFilter
+  texture.minFilter = THREE.LinearMipmapLinearFilter
   texture.magFilter = THREE.LinearFilter
+
+  const collisionMask = drawAcrylicContourMask(paths, worldWidth, worldHeight, 384)
+  const context = collisionMask.getContext('2d', { willReadFrequently: true })
+  if (!context) {
+    texture.dispose()
+    throw new Error('Canvas 2D context is unavailable')
+  }
+  const pixels = context.getImageData(0, 0, collisionMask.width, collisionMask.height).data
+  const alpha = new Uint8ClampedArray(collisionMask.width * collisionMask.height)
+  for (let index = 0; index < alpha.length; index += 1) alpha[index] = pixels[index * 4 + 3]
   return {
     texture,
-    colliderRects: alphaMaskToCollisionLayout(dilated, width, height).rectangles
+    colliderRects: alphaMaskToCollisionLayout(alpha, collisionMask.width, collisionMask.height).rectangles
   }
 }
 
@@ -1123,7 +1152,9 @@ export class SceneRuntime {
     })
     imageMaterial.forceSinglePass = true
     const image = new THREE.Mesh(new THREE.PlaneGeometry(panelWidth, panelHeight), imageMaterial)
-    const imageSurfaceZ = type === 'acrylic' ? 0.04 : type === 'panel' ? 0.042 : 0.024
+    const imageSurfaceZ = type === 'acrylic'
+      ? ACRYLIC_PANEL_DEPTH / 2 + ACRYLIC_PRINT_SURFACE_GAP
+      : type === 'panel' ? 0.042 : 0.024
     image.position.set(0, imageBottom + panelHeight / 2, imageSurfaceZ)
     image.renderOrder = type === 'acrylic' ? 12 : 2
     image.castShadow = true
@@ -1137,6 +1168,20 @@ export class SceneRuntime {
       thickness: 0.04,
       alphaOpacity: 0.09
     })
+    const createClearEdge = (): THREE.MeshPhysicalMaterial => {
+      const material = createClearAcrylicMaterial({
+        mode: acrylicRenderMode,
+        color: 0xddeeee,
+        roughness: 0.14,
+        thickness: ACRYLIC_PANEL_DEPTH,
+        alphaOpacity: 0.2
+      })
+      // A detailed closed contour contains many front-facing wall segments.
+      // Without a depth write, farther segments blend through nearer ones as
+      // rectangular bands even though the wall geometry itself is smooth.
+      material.depthWrite = true
+      return material
+    }
     const dark = new THREE.MeshStandardMaterial({ color: 0x302c28, roughness: 0.55 })
     const cream = new THREE.MeshStandardMaterial({ color: 0xe2d8c9, roughness: 0.6 })
     let acrylicCollider: AcrylicColliderGeometry | undefined
@@ -1146,33 +1191,65 @@ export class SceneRuntime {
       const shape = item.acrylicShape ?? 'contour'
       let collisionShape = shape
       let contourRects: AcrylicColliderGeometry['panel']['contourRects'] = []
-      let backing: THREE.Mesh
+      let backing: THREE.Object3D
       if (shape === 'rectangle') {
-        backing = new THREE.Mesh(new THREE.BoxGeometry(panelWidth + offset * 2, panelHeight + offset * 2, 0.04), clear)
+        backing = new THREE.Mesh(new THREE.BoxGeometry(panelWidth + offset * 2, panelHeight + offset * 2, ACRYLIC_PANEL_DEPTH), clear)
       } else if (shape === 'ellipse') {
         const ellipse = new THREE.Shape()
         ellipse.absellipse(0, 0, panelWidth / 2 + offset, panelHeight / 2 + offset, 0, Math.PI * 2, false, 0)
-        const geometry = new THREE.ExtrudeGeometry(ellipse, { depth: 0.04, bevelEnabled: false, curveSegments: 48 })
-        geometry.translate(0, 0, -0.02)
-        backing = new THREE.Mesh(geometry, clear)
+        const geometry = new THREE.ExtrudeGeometry(ellipse, { depth: ACRYLIC_PANEL_DEPTH, bevelEnabled: false, curveSegments: 48 })
+        geometry.translate(0, 0, -ACRYLIC_PANEL_DEPTH / 2)
+        backing = new THREE.Mesh(geometry, [clear, createClearEdge()])
       } else {
+        let cutoutTexture: THREE.CanvasTexture | null = null
         try {
-          const cutout = createAcrylicCutoutTexture(texture.image as CanvasImageSource, width, height, panelWidth, panelHeight, offset)
-          const cutoutMaterial = createClearAcrylicMaterial({
-            mode: acrylicRenderMode,
-            map: cutout.texture,
-            color: 0xffffff,
-            roughness: 0.04,
-            thickness: 0.02,
-            alphaOpacity: 0.11,
-            alphaTest: 0.01,
-            side: THREE.DoubleSide
+          const cutout = createAcrylicCutout(texture.image as CanvasImageSource, width, height, panelWidth, panelHeight, offset)
+          const contour = createAcrylicContourGeometry({
+            alpha: cutout.alpha,
+            width: cutout.width,
+            height: cutout.height,
+            worldWidth: panelWidth,
+            worldHeight: panelHeight,
+            depth: ACRYLIC_PANEL_DEPTH,
+            offset
           })
-          backing = new THREE.Mesh(new THREE.PlaneGeometry(panelWidth + offset * 2, panelHeight + offset * 2), cutoutMaterial)
-          contourRects = cutout.colliderRects
+          if (!contour) throw new Error('The image has no visible acrylic contour')
+          const contourWidth = panelWidth + offset * 2
+          const contourHeight = panelHeight + offset * 2
+          const contourMask = createAcrylicContourMask(contour.paths, contourWidth, contourHeight)
+          cutoutTexture = contourMask.texture
+          const backingGroup = new THREE.Group()
+          const capMaterial = createClearAcrylicMaterial({
+            mode: acrylicRenderMode,
+            map: contourMask.texture,
+            color: 0xffffff,
+            roughness: 0.08,
+            thickness: ACRYLIC_PANEL_DEPTH,
+            alphaOpacity: 0.1,
+            alphaTest: 0.01
+          })
+          const caps = new THREE.Mesh(
+            createAcrylicContourCapGeometry(
+              contourWidth,
+              contourHeight,
+              ACRYLIC_PANEL_DEPTH
+            ),
+            capMaterial
+          )
+          caps.renderOrder = 10
+          const side = new THREE.Mesh(contour.geometry, createClearEdge())
+          side.renderOrder = 11
+          backingGroup.add(caps, side)
+          backing = backingGroup
+          contourRects = contourMask.colliderRects
         } catch (error) {
+          cutoutTexture?.dispose()
           console.warn(`Could not generate acrylic outline for ${item.name}`, error)
-          backing = new THREE.Mesh(new THREE.BoxGeometry(panelWidth + offset * 2, panelHeight + offset * 2, 0.04), clear)
+          backing = new THREE.Mesh(new THREE.BoxGeometry(
+            panelWidth + offset * 2,
+            panelHeight + offset * 2,
+            ACRYLIC_PANEL_DEPTH
+          ), clear)
           collisionShape = 'rectangle'
         }
       }

@@ -26,6 +26,7 @@
   "dependencies": {
     "@dimforge/rapier3d-compat": "0.20.0",
     "@pixiv/three-vrm": "3.5.5",
+    "clipper2-ts": "^2.0.1-18",
     "fflate": "0.8.2",
     "i18next": "26.3.6",
     "lucide-react": "^1.31.0",
@@ -78,11 +79,16 @@
       {
         "from": "licenses/fonts",
         "to": "licenses/fonts"
+      },
+      {
+        "from": "licenses/runtime",
+        "to": "licenses/runtime"
       }
     ],
     "mac": {
       "category": "public.app-category.entertainment",
-      "identity": null,
+      "identity": "-",
+      "hardenedRuntime": false,
       "icon": "build/icon.icns",
       "target": [
         {
