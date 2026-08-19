@@ -2,12 +2,14 @@ import RAPIER from '@dimforge/rapier3d-compat'
 import { VRMLoaderPlugin, VRMUtils, type VRM } from '@pixiv/three-vrm'
 import * as THREE from 'three'
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js'
+import { DDSLoader } from 'three/examples/jsm/loaders/DDSLoader.js'
 import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js'
 import { MTLLoader } from 'three/examples/jsm/loaders/MTLLoader.js'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
+import { TGALoader } from 'three/examples/jsm/loaders/TGALoader.js'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
@@ -61,6 +63,8 @@ import { isPhysicsSceneHydrated, restoredItemSupportPriority } from './sceneHydr
 import { pickSceneSelection, transformAxisAtPointer } from './sceneSelection'
 import { prepareImportedModelForScene } from './importedModel'
 import { createStlMesh } from './stlModel'
+import { renderPixelRatio, renderQualitySettings, renderShadowsEnabled } from './renderQuality'
+import { redirectFbxTextureUrl } from './fbxResources'
 
 interface SceneCallbacks {
   onSelect: (id: string | null) => void
@@ -443,7 +447,9 @@ export class SceneRuntime {
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       alpha: true,
-      antialias: quality !== 'low',
+      // WebGL antialiasing is fixed when the context is created. Keeping it stable
+      // prevents a quality change from looking different after the next restart.
+      antialias: true,
       powerPreference: 'high-performance',
       preserveDrawingBuffer: true
     })
@@ -451,8 +457,8 @@ export class SceneRuntime {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
     this.renderer.toneMappingExposure = 1.05
-    this.renderer.shadowMap.enabled = quality !== 'low'
-    this.renderer.shadowMap.type = quality === 'high' ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap
+    this.renderer.shadowMap.enabled = renderQualitySettings(quality).shadowsEnabled
+    this.renderer.shadowMap.type = THREE.PCFShadowMap
     this.renderer.setClearColor(0x000000, variant === 'display' ? 0 : 1)
 
     if (variant === 'editor') this.scene.background = new THREE.Color(0x181715)
@@ -545,9 +551,10 @@ export class SceneRuntime {
     this.keyLight = new THREE.SpotLight(0xffe2b8, 60, 18, Math.PI / 4.5, 0.62, 1.4)
     this.keyLight.position.set(2.4, 6, 4.2)
     this.keyLight.target.position.set(0, 1.2, 0)
-    this.keyLight.castShadow = true
+    this.keyLight.castShadow = renderQualitySettings(quality).shadowsEnabled
     this.keyLight.shadow.normalBias = 0.018
-    this.keyLight.shadow.mapSize.set(quality === 'high' ? 2048 : 1024, quality === 'high' ? 2048 : 1024)
+    const shadowMapSize = renderQualitySettings(quality).shadowMapSize
+    this.keyLight.shadow.mapSize.set(shadowMapSize, shadowMapSize)
     this.scene.add(this.fillLight, this.keyLight, this.keyLight.target)
 
     this.ktx2Loader.detectSupport(this.renderer)
@@ -741,8 +748,23 @@ export class SceneRuntime {
   setQuality(quality: QualityPreset): void {
     if (quality === this.quality) return
     this.quality = quality
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, quality === 'high' ? 2 : quality === 'balanced' ? 1.5 : 1))
-    this.renderer.shadowMap.enabled = quality !== 'low'
+    const settings = renderQualitySettings(quality)
+    this.renderer.setPixelRatio(renderPixelRatio(quality, window.devicePixelRatio))
+
+    const shadow = this.keyLight.shadow
+    if (shadow.mapSize.x !== settings.shadowMapSize || shadow.mapSize.y !== settings.shadowMapSize) {
+      shadow.map?.dispose()
+      shadow.mapPass?.dispose()
+      shadow.map = null
+      shadow.mapPass = null
+      shadow.mapSize.set(settings.shadowMapSize, settings.shadowMapSize)
+    }
+
+    const shadowsEnabled = renderShadowsEnabled(quality, this.project?.lighting.shadows ?? true)
+    this.keyLight.castShadow = shadowsEnabled
+    this.renderer.shadowMap.enabled = shadowsEnabled
+    shadow.needsUpdate = true
+    this.renderer.shadowMap.needsUpdate = true
   }
 
   dispose(): void {
@@ -850,7 +872,7 @@ export class SceneRuntime {
     const height = Math.max(1, this.canvas.clientHeight)
     this.camera.aspect = width / height
     this.camera.updateProjectionMatrix()
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.quality === 'high' ? 2 : this.quality === 'balanced' ? 1.5 : 1))
+    this.renderer.setPixelRatio(renderPixelRatio(this.quality, window.devicePixelRatio))
     this.renderer.setSize(width, height, false)
     this.viewportGizmo?.update()
   }
@@ -870,8 +892,9 @@ export class SceneRuntime {
     this.fillLight.intensity = 1.1 * intensity
     this.keyLight.intensity = 58 * intensity
     this.keyLight.color.copy(roundedColor(project.lighting.warmth))
-    this.keyLight.castShadow = project.lighting.shadows && this.quality !== 'low'
-    this.renderer.shadowMap.enabled = project.lighting.shadows && this.quality !== 'low'
+    const shadowsEnabled = renderShadowsEnabled(this.quality, project.lighting.shadows)
+    this.keyLight.castShadow = shadowsEnabled
+    this.renderer.shadowMap.enabled = shadowsEnabled
   }
 
   private buildCase(preset: CasePreset): void {
@@ -1034,6 +1057,10 @@ export class SceneRuntime {
       }
       clips = gltf.animations
     } else if (item.format === 'fbx') {
+      manager.setURLModifier((url) => redirectFbxTextureUrl(item.assetUrl, url))
+      manager.addHandler(/\.tga$/i, new TGALoader(manager))
+      manager.addHandler(/\.dds$/i, new DDSLoader(manager))
+      manager.addHandler(/\.ktx2$/i, this.ktx2Loader)
       const fbx = await new FBXLoader(manager).loadAsync(item.assetUrl)
       content = fbx
       clips = fbx.animations

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -446,6 +446,24 @@ describe('ProjectStore', () => {
 
     const copiedPath = store.resolveAssetPath(project.id, asset.relativePath)
     expect(await readFile(copiedPath, 'utf8')).toContain('o Figure')
+  })
+
+  it('copies an FBX external texture beside the stored model', async () => {
+    const store = await createStore()
+    const project = await store.getActiveProject()
+    const sourceRoot = join(temporaryRoots[0], 'fbx-source')
+    await mkdir(join(sourceRoot, 'textures'), { recursive: true })
+    const source = join(sourceRoot, 'figure.fbx')
+    const texture = join(sourceRoot, 'textures', 'body.png')
+    await writeFile(source, 'RelativeFilename: "textures\\\\body.png"\n', 'utf8')
+    await writeFile(texture, new Uint8Array([10, 20, 30]))
+
+    const [asset] = await store.importFiles(project.id, [source])
+    const group = asset.relativePath.split('/')[0]
+
+    expect(asset).toMatchObject({ kind: 'model', extension: 'fbx' })
+    expect(new Uint8Array(await readFile(store.resolveAssetPath(project.id, `${group}/body.png`))))
+      .toEqual(new Uint8Array([10, 20, 30]))
   })
 
   it('round-trips an STL model through a project archive', async () => {

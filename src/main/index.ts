@@ -22,7 +22,7 @@ import type {
   ProjectPatch,
   ProjectResetScope
 } from '../shared/types'
-import { IMAGE_EXTENSIONS, MODEL_EXTENSIONS } from './asset-import'
+import { IMAGE_EXTENSIONS, MODEL_EXTENSIONS, SUPPORT_EXTENSIONS } from './asset-import'
 import { createAssetResponse } from './asset-response'
 import { shouldRecoverDisplayPointer, toDisplayClientPoint } from './display-pointer'
 import { ProjectStore } from './project-store'
@@ -615,7 +615,7 @@ function registerIpc(): void {
       properties: ['openFile', 'multiSelections'],
       filters: [
         { name: '3D models and images', extensions: [...MODEL_EXTENSIONS, ...IMAGE_EXTENSIONS] },
-        { name: 'Model support files', extensions: ['bin', 'mtl'] }
+        { name: 'Model support files', extensions: [...SUPPORT_EXTENSIONS] }
       ]
     }
     const result = editorWindow

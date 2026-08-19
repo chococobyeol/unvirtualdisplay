@@ -1,9 +1,10 @@
 import { readFile, stat } from 'node:fs/promises'
-import { dirname, extname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path'
+import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path'
 
 export const MODEL_EXTENSIONS = new Set(['glb', 'gltf', 'vrm', 'fbx', 'obj', 'stl'])
 export const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp'])
-export const SUPPORT_EXTENSIONS = new Set(['bin', 'mtl'])
+export const SUPPORT_EXTENSIONS = new Set(['bin', 'mtl', 'bmp', 'tga', 'dds', 'ktx2'])
+const FBX_TEXTURE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp', 'bmp', 'tga', 'dds', 'ktx2'])
 
 export interface AssetImportFile {
   sourcePath: string
@@ -118,6 +119,88 @@ async function objDependencies(path: string): Promise<AssetImportFile[]> {
   }
 }
 
+function isFbxTextureReference(value: string): boolean {
+  return FBX_TEXTURE_EXTENSIONS.has(extname(value).slice(1).toLowerCase())
+}
+
+function fbxTextureReferences(contents: Buffer): string[] {
+  const references: string[] = []
+  const isBinary = contents.subarray(0, 23).toString('ascii').startsWith('Kaydara FBX Binary')
+
+  if (!isBinary) {
+    const asciiProperty = /(?:RelativeFilename|Filename|FileName)\s*:\s*["']([^"'\r\n]+)["']/gi
+    for (const match of contents.toString('utf8').matchAll(asciiProperty)) {
+      const reference = localUri(match[1])
+      if (reference && isFbxTextureReference(reference)) references.push(reference)
+    }
+  }
+
+  // Binary FBX string properties are encoded as: "S", uint32 byte length,
+  // followed by the UTF-8 bytes. Reading those strings avoids treating the
+  // surrounding binary data as a filename.
+  for (let offset = 0; offset + 5 <= contents.length; offset += 1) {
+    if (contents[offset] !== 0x53) continue
+    const length = contents.readUInt32LE(offset + 1)
+    if (length === 0 || length > 4096 || offset + 5 + length > contents.length) continue
+    const value = contents.subarray(offset + 5, offset + 5 + length).toString('utf8')
+    const reference = localUri(value)
+    if (reference && isFbxTextureReference(reference)) references.push(reference)
+  }
+
+  return [...new Set(references)]
+}
+
+async function resolveFbxTexture(
+  root: string,
+  reference: string,
+  selectedImagesByName: ReadonlyMap<string, string>
+): Promise<AssetImportFile | null> {
+  const normalizedReference = reference.replaceAll('\\', '/')
+  const textureName = basename(normalizedReference)
+  if (!textureName || !isFbxTextureReference(textureName)) return null
+
+  // FBXLoader resolves external images by their basename, so every discovered
+  // texture is copied beside the imported FBX even when the source used a
+  // nested relative path.
+  const direct = await existingDependency(root, normalizedReference)
+  if (direct) return { sourcePath: direct.sourcePath, relativePath: textureName }
+
+  const adjacentPath = join(root, textureName)
+  if (await isFile(adjacentPath)) return { sourcePath: adjacentPath, relativePath: textureName }
+
+  const selectedPath = selectedImagesByName.get(textureName.toLocaleLowerCase('en-US'))
+  return selectedPath && await isFile(selectedPath)
+    ? { sourcePath: selectedPath, relativePath: textureName }
+    : null
+}
+
+async function fbxDependencies(path: string, selected: readonly string[]): Promise<AssetImportFile[]> {
+  try {
+    const root = dirname(path)
+    const selectedImagesByName = new Map(
+      selected
+        .filter((candidate) => FBX_TEXTURE_EXTENSIONS.has(extname(candidate).slice(1).toLowerCase()))
+        .map((candidate) => [basename(candidate).toLocaleLowerCase('en-US'), candidate])
+    )
+    const references = fbxTextureReferences(await readFile(path))
+    const dependencies: AssetImportFile[] = []
+    const destinations = new Set<string>()
+
+    for (const reference of references) {
+      const dependency = await resolveFbxTexture(root, reference, selectedImagesByName)
+      if (!dependency) continue
+      const destinationKey = dependency.relativePath.toLocaleLowerCase('en-US')
+      if (destinations.has(destinationKey)) continue
+      destinations.add(destinationKey)
+      dependencies.push(dependency)
+    }
+
+    return dependencies
+  } catch {
+    return []
+  }
+}
+
 function uniqueFiles(files: AssetImportFile[]): AssetImportFile[] {
   const seen = new Set<string>()
   return files.filter((file) => {
@@ -145,7 +228,9 @@ export async function planAssetImports(paths: readonly string[]): Promise<AssetI
       ? await gltfDependencies(sourcePath)
       : extension === 'obj'
         ? await objDependencies(sourcePath)
-        : []
+        : extension === 'fbx'
+          ? await fbxDependencies(sourcePath, selected)
+          : []
     dependencies.forEach((file) => consumedDependencies.add(normalize(file.sourcePath)))
     plans.push({
       sourcePath,
